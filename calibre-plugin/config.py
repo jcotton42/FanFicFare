@@ -15,33 +15,11 @@ import re
 import threading
 from collections import OrderedDict
 
-try:
-    from PyQt5 import QtWidgets as QtGui
-    from PyQt5.Qt import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-                          QLineEdit, QComboBox, QCheckBox, QPushButton, QTabWidget,
-                          QScrollArea, QGroupBox, QButtonGroup, QRadioButton,
-                          Qt)
-except ImportError as e:
-    from PyQt4 import QtGui
-    from PyQt4.Qt import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-                          QLineEdit, QComboBox, QCheckBox, QPushButton, QTabWidget,
-                          QScrollArea, QGroupBox, QButtonGroup, QRadioButton,
-                          Qt)
-try:
-    from calibre.gui2 import QVariant
-    del QVariant
-except ImportError:
-    is_qt4 = False
-    convert_qvariant = lambda x: x
-else:
-    is_qt4 = True
-    def convert_qvariant(x):
-        vt = x.type()
-        if vt == x.String:
-            return unicode(x.toString())
-        if vt == x.List:
-            return [convert_qvariant(i) for i in x.toList()]
-        return x.toPyObject()
+from PyQt5 import QtWidgets as QtGui
+from PyQt5.Qt import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+                      QLineEdit, QComboBox, QCheckBox, QPushButton, QTabWidget,
+                      QScrollArea, QGroupBox, QButtonGroup, QRadioButton,
+                      Qt)
 
 from calibre.gui2 import dynamic, info_dialog
 from calibre.gui2.complete2 import EditWithComplete
@@ -317,6 +295,7 @@ class ConfigWidget(QWidget):
             prefs['lookforurlinhtml'] = self.basic_tab.lookforurlinhtml.isChecked()
             prefs['checkforseriesurlid'] = self.basic_tab.checkforseriesurlid.isChecked()
             prefs['auto_reject_seriesurlid'] = self.basic_tab.auto_reject_seriesurlid.isChecked()
+            prefs['mark_series_anthologies'] = self.basic_tab.mark_series_anthologies.isChecked()
             prefs['checkforurlchange'] = self.basic_tab.checkforurlchange.isChecked()
             prefs['injectseries'] = self.basic_tab.injectseries.isChecked()
             prefs['matchtitleauth'] = self.basic_tab.matchtitleauth.isChecked()
@@ -356,7 +335,7 @@ class ConfigWidget(QWidget):
             prefs['gcnewonly'] = self.calibrecover_tab.gcnewonly.isChecked()
             gc_site_settings = {}
             for (site,combo) in six.iteritems(self.calibrecover_tab.gc_dropdowns):
-                val = unicode(convert_qvariant(combo.itemData(combo.currentIndex())))
+                val = unicode(combo.itemData(combo.currentIndex()))
                 if val != 'none':
                     gc_site_settings[site] = val
                     #print("gc_site_settings[%s]:%s"%(site,gc_site_settings[site]))
@@ -399,19 +378,19 @@ class ConfigWidget(QWidget):
 
             # Custom Columns tab
             # error column
-            prefs['errorcol'] = unicode(convert_qvariant(self.cust_columns_tab.errorcol.itemData(self.cust_columns_tab.errorcol.currentIndex())))
+            prefs['errorcol'] = unicode(self.cust_columns_tab.errorcol.itemData(self.cust_columns_tab.errorcol.currentIndex()))
             prefs['save_all_errors'] = self.cust_columns_tab.save_all_errors.isChecked()
 
             # metadata column
-            prefs['savemetacol'] = unicode(convert_qvariant(self.cust_columns_tab.savemetacol.itemData(self.cust_columns_tab.savemetacol.currentIndex())))
+            prefs['savemetacol'] = unicode(self.cust_columns_tab.savemetacol.itemData(self.cust_columns_tab.savemetacol.currentIndex()))
 
             # lastchecked column
-            prefs['lastcheckedcol'] = unicode(convert_qvariant(self.cust_columns_tab.lastcheckedcol.itemData(self.cust_columns_tab.lastcheckedcol.currentIndex())))
+            prefs['lastcheckedcol'] = unicode(self.cust_columns_tab.lastcheckedcol.itemData(self.cust_columns_tab.lastcheckedcol.currentIndex()))
 
             # cust cols tab
             colsmap = {}
             for (col,combo) in six.iteritems(self.cust_columns_tab.custcol_dropdowns):
-                val = unicode(convert_qvariant(combo.itemData(combo.currentIndex())))
+                val = unicode(combo.itemData(combo.currentIndex()))
                 if val != 'none':
                     colsmap[col] = val
                     #print("colsmap[%s]:%s"%(col,colsmap[col]))
@@ -538,10 +517,24 @@ class BasicTab(QWidget):
         self.auto_reject_seriesurlid.setToolTip(_("Automatically reject storys with existing Series Anthology books.\nOnly works if 'Check for existing Series Anthology books' is on.\nDoesn't work when Collect Metadata in Background is selected."))
         self.auto_reject_seriesurlid.setChecked(prefs['auto_reject_seriesurlid'])
         self.auto_reject_seriesurlid.setEnabled(self.checkforseriesurlid.isChecked())
-        self.checkforseriesurlid.stateChanged.connect(lambda x : self.auto_reject_seriesurlid.setEnabled(self.checkforseriesurlid.isChecked()))
+
+        self.mark_series_anthologies = QCheckBox(_("Mark Matching Anthologies?"),self)
+        self.mark_series_anthologies.setToolTip(_("Mark and show existing Series Anthology books when individual updates are skipped.\nOnly works if 'Check for existing Series Anthology books' is on.\nDoesn't work when Collect Metadata in Background is selected."))
+        self.mark_series_anthologies.setChecked(prefs['mark_series_anthologies'])
+        self.mark_series_anthologies.setEnabled(self.checkforseriesurlid.isChecked())
+
+        def mark_anthologies():
+            self.auto_reject_seriesurlid.setEnabled(self.checkforseriesurlid.isChecked())
+            self.mark_series_anthologies.setEnabled(self.checkforseriesurlid.isChecked())
+        self.checkforseriesurlid.stateChanged.connect(mark_anthologies)
+        mark_anthologies()
+
         horz = QHBoxLayout()
         horz.addItem(QtGui.QSpacerItem(20, 1))
-        horz.addWidget(self.auto_reject_seriesurlid)
+        vertright = QVBoxLayout()
+        horz.addLayout(vertright)
+        vertright.addWidget(self.auto_reject_seriesurlid)
+        vertright.addWidget(self.mark_series_anthologies)
         self.l.addLayout(horz)
 
         self.checkforurlchange = QCheckBox(_("Check for changed Story URL?"),self)

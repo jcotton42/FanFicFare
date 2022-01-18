@@ -16,38 +16,19 @@ logger = logging.getLogger(__name__)
 
 from datetime import datetime
 
+from PyQt5 import QtWidgets as QtGui
+from PyQt5 import QtCore
+from PyQt5.Qt import (QApplication, QDialog, QWidget, QTableWidget, QVBoxLayout, QHBoxLayout,
+                      QGridLayout, QPushButton, QFont, QLabel, QCheckBox, QIcon,
+                      QLineEdit, QComboBox, QProgressDialog, QTimer, QDialogButtonBox,
+                      QScrollArea, QPixmap, Qt, QAbstractItemView, QTextEdit,
+                      pyqtSignal, QGroupBox, QFrame)
 try:
-    from PyQt5 import QtWidgets as QtGui
-    from PyQt5 import QtCore
-    from PyQt5.Qt import (QApplication, QDialog, QWidget, QTableWidget, QVBoxLayout, QHBoxLayout,
-                          QGridLayout, QPushButton, QFont, QLabel, QCheckBox, QIcon,
-                          QLineEdit, QComboBox, QProgressDialog, QTimer, QDialogButtonBox,
-                          QScrollArea, QPixmap, Qt, QAbstractItemView, QTextEdit,
-                          pyqtSignal, QGroupBox, QFrame)
-except ImportError as e:
-    from PyQt4 import QtGui
-    from PyQt4 import QtCore
-    from PyQt4.Qt import (QApplication, QDialog, QWidget, QTableWidget, QVBoxLayout, QHBoxLayout,
-                          QGridLayout, QPushButton, QFont, QLabel, QCheckBox, QIcon,
-                          QLineEdit, QComboBox, QProgressDialog, QTimer, QDialogButtonBox,
-                          QScrollArea, QPixmap, Qt, QAbstractItemView, QTextEdit,
-                          pyqtSignal, QGroupBox, QFrame)
-
-try:
-    from calibre.gui2 import QVariant
-    del QVariant
-except ImportError:
-    is_qt4 = False
-    convert_qvariant = lambda x: x
-else:
-    is_qt4 = True
-    def convert_qvariant(x):
-        vt = x.type()
-        if vt == x.String:
-            return unicode(x.toString())
-        if vt == x.List:
-            return [convert_qvariant(i) for i in x.toList()]
-        return x.toPyObject()
+    # qt6 Calibre v6+
+    QTextEditNoWrap = QTextEdit.LineWrapMode.NoWrap
+except:
+    # qt5 Calibre v2-5
+    QTextEditNoWrap = QTextEdit.NoWrap
 
 from calibre.gui2 import gprefs
 show_download_options = 'fff:add new/update dialogs:show_download_options'
@@ -249,7 +230,7 @@ class AddNewDialog(SizePersistedDialog):
 
         self.url = DroppableQTextEdit(self)
         self.url.setToolTip("UrlTooltip")
-        self.url.setLineWrapMode(QTextEdit.NoWrap)
+        self.url.setLineWrapMode(QTextEditNoWrap)
         self.l.addWidget(self.url)
 
         self.groupbox = QGroupBox(_("Show Download Options"))
@@ -1028,7 +1009,7 @@ class StoryListTableWidget(QTableWidget):
         books = []
         #print("=========================\nbooks:%s"%self.books)
         for row in range(self.rowCount()):
-            rnum = convert_qvariant(self.item(row, 1).data(Qt.UserRole))
+            rnum = self.item(row, 1).data(Qt.UserRole)
             book = self.books[rnum]
             books.append(book)
         return books
@@ -1216,7 +1197,7 @@ class RejectListDialog(SizePersistedDialog):
         rejectrows = []
         for row in range(self.rejects_table.rowCount()):
             url = unicode(self.rejects_table.item(row, 0).text()).strip()
-            book_id =convert_qvariant(self.rejects_table.item(row, 0).data(Qt.UserRole))
+            book_id =self.rejects_table.item(row, 0).data(Qt.UserRole)
             title = unicode(self.rejects_table.item(row, 1).text()).strip()
             auth = unicode(self.rejects_table.item(row, 2).text()).strip()
             note = unicode(self.rejects_table.cellWidget(row, 3).currentText()).strip()
@@ -1226,7 +1207,7 @@ class RejectListDialog(SizePersistedDialog):
     def get_reject_list_ids(self):
         rejectrows = []
         for row in range(self.rejects_table.rowCount()):
-            book_id = convert_qvariant(self.rejects_table.item(row, 0).data(Qt.UserRole))
+            book_id = self.rejects_table.item(row, 0).data(Qt.UserRole)
             if book_id:
                 rejectrows.append(book_id)
         return rejectrows
@@ -1261,7 +1242,7 @@ class EditTextDialog(SizePersistedDialog):
         self.l.addWidget(self.label)
 
         self.textedit = QTextEdit(self)
-        self.textedit.setLineWrapMode(QTextEdit.NoWrap)
+        self.textedit.setLineWrapMode(QTextEditNoWrap)
         self.textedit.setReadOnly(read_only)
         self.textedit.setText(text)
         self.l.addWidget(self.textedit)
@@ -1334,7 +1315,7 @@ class IniTextDialog(SizePersistedDialog):
                                      entry_keywords=get_valid_entry_keywords(),
                                      )
 
-        self.textedit.setLineWrapMode(QTextEdit.NoWrap)
+        self.textedit.setLineWrapMode(QTextEditNoWrap)
         try:
             self.textedit.setFont(QFont("Courier",
                                    parent.font().pointSize()+1))
