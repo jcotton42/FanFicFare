@@ -88,7 +88,6 @@ from . import adapter_literotica
 from . import adapter_voracity2eficcom
 from . import adapter_spikeluvercom
 from . import adapter_bloodshedversecom
-from . import adapter_fanfichu
 from . import adapter_fictionmaniatv
 from . import adapter_themaplebookshelf
 from . import adapter_sheppardweircom
@@ -166,6 +165,7 @@ from . import adapter_worldofxde
 from . import adapter_psychficcom
 from . import adapter_deviantartcom
 from . import adapter_patreoncom
+from . import adapter_merengohu
 
 ## This bit of complexity allows adapters to be added by just adding
 ## importing.  It eliminates the long if/else clauses we used to need
