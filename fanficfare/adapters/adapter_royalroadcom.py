@@ -174,6 +174,10 @@ class RoyalRoadAdapter(BaseSiteAdapter):
                 self.story.setMetadata('status', 'In-Progress')
             elif 'HIATUS' == label:
                 self.story.setMetadata('status', 'Hiatus')
+            elif 'STUB' == label:
+                self.story.setMetadata('status', 'Stub')
+            elif 'DROPPED' == label:
+                self.story.setMetadata('status', 'Dropped')
             elif 'Fan Fiction' == label:
                 self.story.addToList('category', 'FanFiction')
             elif 'Original' == label:

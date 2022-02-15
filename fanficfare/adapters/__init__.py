@@ -70,7 +70,6 @@ from . import adapter_themasquenet
 from . import adapter_pretendercentrecom
 from . import adapter_darksolaceorg
 from . import adapter_finestoriescom
-from . import adapter_hpfanficarchivecom
 from . import adapter_hlfictionnet
 from . import adapter_dracoandginnycom
 from . import adapter_scarvesandcoffeenet
@@ -166,6 +165,7 @@ from . import adapter_psychficcom
 from . import adapter_deviantartcom
 from . import adapter_patreoncom
 from . import adapter_merengohu
+from . import adapter_readonlymindcom
 
 ## This bit of complexity allows adapters to be added by just adding
 ## importing.  It eliminates the long if/else clauses we used to need
