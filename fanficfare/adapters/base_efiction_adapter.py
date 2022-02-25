@@ -54,7 +54,7 @@ _USERACCOUNT = 'Member Account'
 
 # Regular expressions
 _REGEX_WARNING_PARAM = re.compile(r"warning=(?P<warningId>\d+)")
-_REGEX_CHAPTER_B = re.compile(r"^(?P<chapterId>\d+)\.")
+_REGEX_CHAPTER_B = re.compile(r"^(?P<chapterId>\d+)\.$")
 _REGEX_CHAPTER_PARAM = re.compile(r"chapter=(?P<chapterId>\d+)$")
 _REGEX_CHAPTER_FRAGMENT = re.compile(r"^#(?P<chapterId>\d+)$")
 _REGEX_DOESNT_START_WITH_HTTP = re.compile("^(?!http)")
@@ -196,6 +196,10 @@ class BaseEfictionAdapter(BaseSiteAdapter):
         Constant _USERACCOUNT defined in languages/en.php
         """
         return _USERACCOUNT
+
+    @classmethod
+    def getBacktoIndex(self):
+        return 'Back to index'
 
     ## Login seems to be reasonably standard across eFiction sites.
     @classmethod
@@ -457,10 +461,13 @@ class BaseEfictionAdapter(BaseSiteAdapter):
             m = _REGEX_CHAPTER_B.search(stripHTML(b))
             if m:
                 chapterId = m.group('chapterId')
-                chapterLink = b.findNext("a")
-                chapterLink['href'] = "%s&chapter=%s" % (self.url, chapterId)
-                if chapterLink.string !='Back to index':
-                    self.add_chapter(chapterLink.string, chapterLink['href'])
+                chapterLink = b.findNextSibling("a")
+                ## Only find sibling links and only # anchor links.
+                ## Had a problem with an author putting <b>0.</b> in the text.
+                if chapterLink and chapterLink['href'].startswith('#'):
+                    chapterLink['href'] = "%s&chapter=%s" % (self.url, chapterId)
+                    if chapterLink.string != self.getBacktoIndex():
+                        self.add_chapter(chapterLink.string, chapterLink['href'])
 
         ## Store reference to soup for getChapterText
         self.html = soup

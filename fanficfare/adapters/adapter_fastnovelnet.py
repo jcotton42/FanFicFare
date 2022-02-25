@@ -66,10 +66,27 @@ class FastNovelNetAdapter(BaseSiteAdapter):
         # https://fastnovel.net/ultimate-scheming-system-158/
         return r"https?://fastnovel\.net/(?P<id>[^/]+)"
 
+    ## Normalized chapter URLs by changing old titlenum part to be
+    ## same as storyId.
+    def normalize_chapterurl(self,url):
+        # https://fastnovel.net/cultivation-chat-group8-29/chapter-25206.html
+        return re.sub(r"\.net/.*(?P<keep>/chapter-\d+.html)",
+                      r".net/"+self.story.getMetadata('storyId')+r"\g<keep>",url)
+
     def extractChapterUrlsAndMetadata(self):
         logger.debug('URL: %s', self.url)
 
-        data = self.get_request(self.url)
+        (data,rurl) = self.get_request_redirected(self.url)
+        if rurl != self.url:
+            match = re.match(self.getSiteURLPattern(), rurl)
+            if not match:
+                ## shouldn't happen, but in case it does...
+                raise exceptions.InvalidStoryURL(url, self.getSiteDomain(), self.getSiteExampleURLs())
+
+            story_id = match.group('id')
+            self.story.setMetadata('storyId', story_id)
+            self._setURL('https://%s/%s/' % (self.getSiteDomain(), story_id))
+            logger.debug("set to redirected url:%s"%self.url)
 
         soup = self.make_soup(data)
 
