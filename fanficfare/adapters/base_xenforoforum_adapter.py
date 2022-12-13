@@ -618,12 +618,20 @@ class BaseXenForoForumAdapter(BaseSiteAdapter):
 
     def parse_author(self,souptag):
         a = souptag.find('h3',{'class':'userText'}).find('a')
-        self.story.addToList('authorId',a['href'].split('/')[1])
-        authorUrl = self.getURLPrefix()+a['href']
-        self.story.addToList('authorUrl',authorUrl)
         self.story.addToList('author',a.text)
-        # logger.debug("author_avatar_cover:%s"%self.getConfig('author_avatar_cover'))
-        if self.getConfig('author_avatar_cover'):
+        authorUrl = None
+        if a.has_attr('href'):
+            self.story.addToList('authorId',a['href'].split('/')[1])
+            authorUrl = self.getURLPrefix()+a['href']
+            self.story.addToList('authorUrl',authorUrl)
+            # logger.debug("author_avatar_cover:%s"%self.getConfig('author_avatar_cover'))
+        else:
+            # No author link found--it's a rare case, but at least one
+            # thread had a 'Guest' account author.
+            self.story.setMetadata('authorUrl',self.getURLPrefix())
+            self.story.setMetadata('authorId','0')
+
+        if self.getConfig('author_avatar_cover') and authorUrl:
             authorcard = self.make_soup(self.get_request(authorUrl))
             # logger.debug(authorcard)
             coverimg = authorcard.find('div',{'class':'avatarScaler'}).find('img')
@@ -788,9 +796,14 @@ class BaseXenForoForumAdapter(BaseSiteAdapter):
 
     def _do_utf8FromSoup(self,url,soup,fetch=None,allow_replace_br_with_p=True):
         if self.getConfig('reveal_invisible_text'):
-            ## when set, remove style='color:transparent'.
+            ## when set, remove style='color:transparent' and add
+            ## class="invisible_text"
             for span in soup.find_all('span',style='color:transparent'):
                 del span['style']
+                if not span.has_attr('class'):
+                    # give it a class list if it doesn't have one.
+                    span['class']=[]
+                span['class'].append("invisible_text")
         if self.getConfig('replace_failed_smilies_with_alt_text'):
             for img in soup.find_all('img',src=re.compile(r'(^data:image|(failedtoload|clear.png)$)')):
                 # logger.debug("replace_failed_smilies_with_alt_text img: %s"%img)

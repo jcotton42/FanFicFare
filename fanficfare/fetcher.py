@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # py2 vs py3 transition
 from .six.moves.urllib.parse import quote_plus
-from .six.moves.http_cookiejar import LWPCookieJar
+from .six.moves.http_cookiejar import LWPCookieJar, MozillaCookieJar
 from .six import text_type as unicode
 from .six import ensure_binary, ensure_text
 
@@ -297,28 +297,6 @@ class FetcherResponse(object):
         self.fromcache = fromcache
         self.json = json
 
-class BasicCookieJar(LWPCookieJar,object):
-    def __init__(self,*args,**kargs):
-        super(BasicCookieJar,self).__init__(*args,**kargs)
-        self.autosave = False
-        # self.filename from parent(s)
-
-    ## used by CLI --save-cache dev debugging feature
-    def set_autosave(self,autosave=False,filename=None):
-        self.autosave = autosave
-        self.filename = filename
-
-    def load_cookiejar(self,filename=None):
-        self.load(self.filename or filename,
-                  ignore_discard=True,
-                  ignore_expires=True)
-
-    def save_cookiejar(self,filename=None):
-        self.save(filename or self.filename,
-                  ignore_discard=True,
-                  ignore_expires=True)
-
-
 class Fetcher(object):
     def __init__(self,getConfig_fn,getConfigList_fn):
         self.getConfig = getConfig_fn
@@ -326,8 +304,36 @@ class Fetcher(object):
 
         self.cookiejar = None
 
-    def get_cookiejar(self,filename=None):
+    def get_cookiejar(self,filename=None,mozilla=False):
+
         if self.cookiejar is None:
+            if mozilla:
+                ParentCookieJar = MozillaCookieJar
+            else:
+                ParentCookieJar = LWPCookieJar
+
+            class BasicCookieJar(ParentCookieJar,object):
+                def __init__(self,*args,**kargs):
+                    super(BasicCookieJar,self).__init__(*args,**kargs)
+                    self.autosave = False
+                    # self.filename from parent(s)
+
+                ## used by CLI --save-cache dev debugging feature
+                def set_autosave(self,autosave=False,filename=None):
+                    self.autosave = autosave
+                    self.filename = filename
+
+                def load_cookiejar(self,filename=None):
+                    self.load(self.filename or filename,
+                              ignore_discard=True,
+                              ignore_expires=True)
+
+                def save_cookiejar(self,filename=None):
+                    self.save(filename or self.filename,
+                              ignore_discard=True,
+                              ignore_expires=True)
+
+
             self.cookiejar = BasicCookieJar(filename=filename)
             if filename:
                 try:
@@ -360,6 +366,7 @@ class Fetcher(object):
                     referer=None,
                     usecache=True):
         # logger.debug("fetcher do_request")
+        # logger.debug(self.get_cookiejar())
         headers = self.make_headers(url,referer=referer)
         fetchresp = self.request(method,url,
                                  headers=headers,
@@ -418,7 +425,17 @@ class RequestsFetcher(Fetcher):
         return requests.Session()
 
     def do_mounts(self,session):
-        session.mount('https://', HTTPAdapter(max_retries=self.retries))
+        if self.getConfig('use_ssl_default_seclevelone',False):
+            import ssl
+            class TLSAdapter(HTTPAdapter):
+                def init_poolmanager(self, *args, **kwargs):
+                    ctx = ssl.create_default_context()
+                    ctx.set_ciphers('DEFAULT@SECLEVEL=1')
+                    kwargs['ssl_context'] = ctx
+                    return super(TLSAdapter, self).init_poolmanager(*args, **kwargs)
+            session.mount('https://', TLSAdapter(max_retries=self.retries))
+        else:
+            session.mount('https://', HTTPAdapter(max_retries=self.retries))
         session.mount('http://', HTTPAdapter(max_retries=self.retries))
         session.mount('file://', FileAdapter())
         # logger.debug("Session Proxies Before:%s"%session.proxies)
@@ -461,11 +478,17 @@ class RequestsFetcher(Fetcher):
         try:
             logger.debug(make_log('RequestsFetcher',method,url,hit='REQ',bar='-'))
             ## resp = requests Response object
+            timeout = 60.0
+            try:
+                timeout = float(self.getConfig("connect_timeout",timeout))
+            except Exception as e:
+                logger.error("connect_timeout setting failed: %s -- Using default value(%s)"%(e,timeout))
             resp = self.get_requests_session().request(method, url,
                                                        headers=headers,
                                                        data=parameters,
                                                        json=json,
-                                                       verify=self.use_verify())
+                                                       verify=self.use_verify(),
+                                                       timeout=timeout)
             logger.debug("response code:%s"%resp.status_code)
             resp.raise_for_status() # raises RequestsHTTPError if error code.
             # consider 'cached' if from file.

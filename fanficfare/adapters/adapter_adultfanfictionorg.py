@@ -57,8 +57,8 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
         # normalized story URL.(checking self.zone against list
         # removed--it was redundant w/getAcceptDomains and
         # getSiteURLPattern both)
-        self._setURL('http://{0}.{1}/story.php?no={2}'.format(self.zone, self.getBaseDomain(), self.story.getMetadata('storyId')))
-        #self._setURL('http://' + self.zone + '.' + self.getBaseDomain() + '/story.php?no='+self.story.getMetadata('storyId'))
+        self._setURL('https://{0}.{1}/story.php?no={2}'.format(self.zone, self.getBaseDomain(), self.story.getMetadata('storyId')))
+        #self._setURL('https://' + self.zone + '.' + self.getBaseDomain() + '/story.php?no='+self.story.getMetadata('storyId'))
 
         # Each adapter needs to have a unique site abbreviation.
         #self.story.setMetadata('siteabbrev',self.getSiteAbbrev())
@@ -113,31 +113,31 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
 
     @classmethod
     def getSiteExampleURLs(self):
-        return ("http://anime.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://anime2.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://bleach.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://books.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://buffy.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://cartoon.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://celeb.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://comics.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://ff.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://games.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://hp.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://inu.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://lotr.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://manga.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://movies.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://naruto.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://ne.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://original.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://tv.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://xmen.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://ygo.adult-fanfiction.org/story.php?no=123456789 "
-              + "http://yuyu.adult-fanfiction.org/story.php?no=123456789")
+        return ("https://anime.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://anime2.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://bleach.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://books.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://buffy.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://cartoon.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://celeb.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://comics.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://ff.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://games.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://hp.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://inu.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://lotr.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://manga.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://movies.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://naruto.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://ne.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://original.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://tv.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://xmen.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://ygo.adult-fanfiction.org/story.php?no=123456789 "
+              + "https://yuyu.adult-fanfiction.org/story.php?no=123456789")
 
     def getSiteURLPattern(self):
-        return r'http?://(anime|anime2|bleach|books|buffy|cartoon|celeb|comics|ff|games|hp|inu|lotr|manga|movies|naruto|ne|original|tv|xmen|ygo|yuyu)\.adult-fanfiction\.org/story\.php\?no=\d+$'
+        return r'https?://(anime|anime2|bleach|books|buffy|cartoon|celeb|comics|ff|games|hp|inu|lotr|manga|movies|naruto|ne|original|tv|xmen|ygo|yuyu)\.adult-fanfiction\.org/story\.php\?no=\d+$'
 
     ##This is not working right now, so I'm commenting it out, but leaving it for future testing
     ## Login seems to be reasonably standard across eFiction sites.
@@ -217,7 +217,7 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
         self.story.setMetadata('title',stripHTML(a).replace('\\','').replace('  ',' ').replace('  ',' ').replace('  ',' ').strip())
 
         # Find the chapters:
-        chapters = soup.find('div',{'class':'dropdown-content'})
+        chapters = soup.find('ul',{'class':'dropdown-content'})
         for i, chapter in enumerate(chapters.findAll('a')):
             self.add_chapter(chapter,self.url+'&chapter='+unicode(i+1))
 
@@ -229,7 +229,7 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
             # but I posit that if the story is there, even if we can't get the metadata from the
             # author page, the story should still be able to be downloaded, which is what I've done here.
             self.story.setMetadata('authorId','000000000')
-            self.story.setMetadata('authorUrl','http://www.adult-fanfiction.org')
+            self.story.setMetadata('authorUrl','https://www.adult-fanfiction.org')
             self.story.setMetadata('author','Unknown')
             logger.warning('There was no author found for the story... Metadata will not be retreived.')
             self.setDescription(url,'>>>>>>>>>> No Summary Given <<<<<<<<<<')
@@ -258,18 +258,23 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
 
             asoup = self.make_soup(adata)
 
-            ##Getting the number of pages
-            pages=asoup.find('div',{'class' : 'pagination'}).findAll('li')[-1].find('a')
-            if not pages == None:
-                pages = pages['href'].split('=')[-1]
-            else:
-                pages = 0
+            ##Getting the number of author pages
+            pages = 0
+            pagination=asoup.find('ul',{'class' : 'pagination'})
+            if pagination:
+                pages = pagination.findAll('li')[-1].find('a')
+                if not pages == None:
+                    pages = pages['href'].split('=')[-1]
+                else:
+                    pages = 0
 
+            storya = None
             ##If there is only 1 page of stories, check it to get the Metadata,
             if pages == 0:
                 a = asoup.findAll('li')
                 for lc2 in a:
                     if lc2.find('a', href=re.compile(r'story.php\?no='+self.story.getMetadata('storyId')+"$")):
+                        storya = lc2
                         break
             ## otherwise go through the pages
             else:
@@ -293,6 +298,7 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
                     for lc2 in a:
                         if lc2.find('a', href=re.compile(r'story.php\?no='+self.story.getMetadata('storyId')+"$")):
                             i=1
+                            storya = lc2
                             break
                     page = page + 1
                     if page > int(pages):
@@ -305,14 +311,14 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
             ##There is also a double <br/>, so we have to fix that, then remove the leading and trailing '-:-'.
             ##They are always in the same order.
             ## EDIT 09/26/2016: Had some trouble with unicode errors... so I had to put in the decode/encode parts to fix it
-            liMetadata = unicode(lc2).replace('\n','').replace('\r','').replace('\t',' ').replace('  ',' ').replace('  ',' ').replace('  ',' ')
+            liMetadata = unicode(storya).replace('\n','').replace('\r','').replace('\t',' ').replace('  ',' ').replace('  ',' ').replace('  ',' ')
             liMetadata = stripHTML(liMetadata.replace(r'<br/>','-:-').replace('<!-- <br /-->','-:-'))
             liMetadata = liMetadata.strip('-:-').strip('-:-').encode('utf-8')
             for i, value in enumerate(liMetadata.decode('utf-8').split('-:-')):
                 if i == 0:
                     # The value for the title has been manipulated, so may not be the same as gotten at the start.
-                    # I'm going to use the href from the lc2 retrieved from the author's page to determine if it is correct.
-                    if lc2.find('a', href=re.compile(r'story.php\?no='+self.story.getMetadata('storyId')+"$"))['href'] != url:
+                    # I'm going to use the href from the storya retrieved from the author's page to determine if it is correct.
+                    if storya.find('a', href=re.compile(r'story.php\?no='+self.story.getMetadata('storyId')+"$"))['href'] != url:
                         raise exceptions.StoryDoesNotExist('Did not find story in author story list: {0}'.format(author_Url))
                 elif i == 1:
                     ##Get the description
@@ -367,7 +373,7 @@ class AdultFanFictionOrgAdapter(BaseSiteAdapter):
         logger.debug('Getting chapter text from: %s' % url)
 
         soup = self.make_soup(self.get_request(url))
-        chaptertag = soup.find('div',{'class' : 'pagination'}).parent.findNext('td')
+        chaptertag = soup.find('ul',{'class':'pagination'}).parent.parent.parent.findNextSibling('li')
         if None == chaptertag:
             raise exceptions.FailedToDownload("Error downloading Chapter: {0}!  Missing required element!".format(url))
         # Change td to a div.

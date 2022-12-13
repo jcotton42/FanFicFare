@@ -167,6 +167,9 @@ class BaseSiteAdapter(Requestable):
             meta = defaultdict(unicode,othermeta) # copy othermeta
             if title:
                 title = stripHTML(title,remove_all_entities=False)
+                # Put the basic 3 html entities back in.
+                # bs4 is 'helpfully' removing them.
+                title = title.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
             else:
                 ## A default value for when there's no chapter
                 ## title. Cropped up once with adapter_novelonlinefullcom
@@ -269,26 +272,35 @@ class BaseSiteAdapter(Requestable):
                     passchap['url'] = url
                     passchap['title'] = title
                     passchap['html'] = data
-                ## XXX -- add chapter text replacement here?
+                    ## XXX -- add chapter text replacement here?
+                    ## No?  Want to be able to configure by [writer]
+                    ## It's a soup or soup part?
                 self.story.addChapter(passchap, newchap)
             self.storyDone = True
 
             # include image, but no cover from story, add default_cover_image cover.
-            if self.getConfig('include_images') and \
-                    not self.story.cover and \
-                    self.getConfig('default_cover_image'):
-                self.story.addImgUrl(None,
-                                     #self.getConfig('default_cover_image'),
-                                     self.story.formatFileName(self.getConfig('default_cover_image'),
-                                                               self.getConfig('allow_unsafe_filename')),
-                                     self.get_request_raw,
-                                     cover=True)
-                self.story.setMetadata('cover_image','default')
+            if self.getConfig('include_images'):
+                cover_image_url = None
+                if self.getConfig('force_cover_image'):
+                    cover_image_type = 'force'
+                    cover_image_url = self.getConfig('force_cover_image')
+                    logger.debug('force_cover_image')
+                elif not self.story.cover and \
+                        self.getConfig('default_cover_image'):
+                    cover_image_type = 'default'
+                    cover_image_url = self.getConfig('default_cover_image')
+                    logger.debug('default_cover_image')
+                if cover_image_url:
+                    (src,longdesc) = self.story.addImgUrl(url, # chapter url as referrer
+                                                          self.story.formatFileName(cover_image_url,
+                                                                                    self.getConfig('allow_unsafe_filename')),
+                                                          self.get_request_raw,
+                                                          cover=True)
+                    if src and src != 'failedtoload':
+                        self.story.setMetadata('cover_image',cover_image_type)
 
-            # no new cover, set old cover, if there is one.
-            if not self.story.cover and self.oldcover:
-                self.story.oldcover = self.oldcover
-                self.story.setMetadata('cover_image','old')
+            # copy oldcover tuple to story.
+            self.story.oldcover = self.oldcover
 
             # cheesy way to carry calibre bookmark file forward across update.
             if self.calibrebookmark:
@@ -562,6 +574,7 @@ class BaseSiteAdapter(Requestable):
 
     def setCoverImage(self,storyurl,imgurl):
         if self.getConfig('include_images'):
+            logger.debug("setCoverImage(%s,%s)"%(storyurl,imgurl))
             return self.story.addImgUrl(storyurl,imgurl,self.get_request_raw,cover=True,
                                         coverexclusion=self.getConfig('cover_exclusion_regexp'))
         else:
@@ -698,29 +711,50 @@ class BaseSiteAdapter(Requestable):
                 #     logger.info("Parsing for normalize_text_links failed...")
 
         try:
-            for t in soup.findAll(recursive=True):
-                for attr in self.get_attr_keys(t):
-                    if attr not in acceptable_attributes:
-                        del t[attr] ## strip all tag attributes except acceptable_attributes
+            # python doesn't have a do-while loop.
+            found_empty=True
+            do_resoup=False
+            while found_empty==True:
+                found_empty=False
+                if do_resoup:
+                    # re-soup when empty tags removed before looking
+                    # for more because multiple 'whitespace' strings
+                    # show up differently and doing stripHTML() also
+                    # catches <br> etc.
+                    soup = BeautifulSoup(unicode(soup),'html5lib')
+                for t in soup.findAll(recursive=True):
+                    for attr in self.get_attr_keys(t):
+                        if attr not in acceptable_attributes:
+                            del t[attr] ## strip all tag attributes except acceptable_attributes
 
-                # these are not acceptable strict XHTML.  But we do already have
-                # CSS classes of the same names defined
-                if t and hasattr(t,'name') and t.name is not None:
-                    if t.name in self.getConfigList('replace_tags_with_spans',['u']):
-                        t['class']=t.name
-                        t.name='span'
-                    if t.name in ('center'):
-                        t['class']=t.name
-                        t.name='div'
-                    # removes paired, but empty non paragraph tags.
-                    if t.name not in self.getConfigList('keep_empty_tags',['p','td','th']) and t.string != None and len(t.string.strip()) == 0 :
-                        t.decompose()
+                    if t and hasattr(t,'name') and t.name is not None:
+                        # remove script tags cross the board.
+                        # epub readers (Moon+, FBReader & Aldiko at least)
+                        # don't like <style> tags in body.
+                        if t.name in self.getConfigList('remove_tags',['script','style']):
+                            t.decompose()
+                            continue
 
-                    # remove script tags cross the board.
-                    # epub readers (Moon+, FBReader & Aldiko at least)
-                    # don't like <style> tags in body.
-                    if t.name in self.getConfigList('remove_tags',['script','style']):
-                        t.decompose()
+                        # these are not acceptable strict XHTML.  But we
+                        # do already have CSS classes of the same names
+                        # defined
+                        if t.name in self.getConfigList('replace_tags_with_spans',['u']):
+                            t['class']=t.name
+                            t.name='span'
+                        if t.name in ('center'):
+                            t['class']=t.name
+                            t.name='div'
+
+                        # Removes paired, but empty non paragraph
+                        # tags.  Make another pass if any are found in
+                        # case parent is now empty.  Could add
+                        # significant time if deeply nested empty
+                        # tags.
+                        tmp = t
+                        if tmp.name not in self.getConfigList('keep_empty_tags',['p','td','th']) and t.string != None and len(t.string.strip()) == 0:
+                            found_empty==True
+                            do_resoup=True
+                            tmp.decompose()
 
         except AttributeError as ae:
             if "%s"%ae != "'NoneType' object has no attribute 'next_element'":
@@ -770,9 +804,12 @@ class BaseSiteAdapter(Requestable):
         '''
 
         ## html5lib handles <noscript> oddly.  See:
-        ## https://bugs.launchpad.net/beautifulsoup/+bug/1277464
-        ## This should 'hide' and restore <noscript> tags.
-        data = data.replace("noscript>","fff_hide_noscript>")
+        ## https://bugs.launchpad.net/beautifulsoup/+bug/1277464 This
+        ## should 'hide' and restore <noscript> tags.  Need to do
+        ## </?noscript instead of noscript> as of Apr2022 when SB
+        ## added a class attr to noscript.  2x replace() faster than
+        ## re.sub() in simple test
+        data = data.replace("<noscript","<fff_hide_noscript").replace("</noscript","</fff_hide_noscript")
 
         ## soup and re-soup because BS4/html5lib is more forgiving of
         ## incorrectly nested tags that way.

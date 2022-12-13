@@ -182,8 +182,8 @@ class FicBookNetAdapter(BaseSiteAdapter):
             for genre in tags.findAll('a',href=re.compile(r'/tags/')):
                 self.story.addToList('genre',stripHTML(genre))
 
-        ratingdt = dlinfo.find('strong',{'class':re.compile(r'badge-rating-.*')})
-        self.story.setMetadata('rating', stripHTML(ratingdt.find_next('span')))
+        ratingdt = dlinfo.find('div',{'class':re.compile(r'badge-rating-.*')})
+        self.story.setMetadata('rating', stripHTML(ratingdt.find('span')))
 
         # meta=table.findAll('a', href=re.compile(r'/ratings/'))
         # i=0
@@ -198,7 +198,7 @@ class FicBookNetAdapter(BaseSiteAdapter):
         #     elif i == 2:
         #         self.story.addToList('warnings', m.find('b').text)
 
-        if dlinfo.find('span', {'class':'badge-status-finished'}):
+        if dlinfo.find('div', {'class':'badge-status-finished'}):
             self.story.setMetadata('status', 'Completed')
         else:
             self.story.setMetadata('status', 'In-Progress')

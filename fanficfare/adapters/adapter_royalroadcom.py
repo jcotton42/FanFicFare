@@ -57,6 +57,9 @@ class RoyalRoadAdapter(BaseSiteAdapter):
         # http://docs.python.org/library/datetime.html#strftime-strptime-behavior
         self.dateformat = '%d/%m/%Y %H:%M:%S %p'
 
+        # RR has globally unique ID for each chapter which can be used for fast lookup
+        self.chapterURLIndex = {}
+
     def make_date(self, parenttag):
         # locale dates differ but the timestamp is easily converted
         timetag = parenttag.find('time')
@@ -87,8 +90,34 @@ class RoyalRoadAdapter(BaseSiteAdapter):
     def getSiteExampleURLs(cls):
         return "https://www.royalroad.com/fiction/3056"
 
+    @classmethod
+    def get_section_url(cls,url):
+        ## minimal URL used for section names in INI and reject list
+        ## for comparison
+        # logger.debug("pre--url:%s"%url)
+        # https://www.royalroad.com/fiction/36051/memories-of-the-fall
+        # https://www.royalroad.com/fiction/36051
+        url = re.sub(r'^https?://(.*/fiction/\d+).*$',r'https://\1',url)
+        # logger.debug("post-url:%s"%url)
+        return url
+
     def getSiteURLPattern(self):
         return "https?"+re.escape("://")+r"(www\.|)royalroadl?\.com/fiction/\d+(/.*)?$"
+
+    ## RR chapter URL only requires the chapter ID number field to be correct, story ID and title values are ignored
+    ## URL format after the domain /fiction/ is long form, storyID/storyTitle/chapter/chapterID/chapterTitle
+    ##  short form has /fiction/chapter/chapterID    both forms have optional final /
+    ## The regex matches both, and is valid if either there are both storyID/storyTitle and chapterTitle fields
+    ##    or if there are neither of those two fields
+    ## In addition, the chapterID must be found in chapterURLIndex table that is built when the ToC metadata is read.
+    def normalize_chapterurl(self,url):
+        chap_pattern = r"https?://(?:www\.)?royalroadl?\.com/fiction(/\d+/[^/]+)?/chapter/(\d+)(/[^/]+)?/?$"
+        match = re.match(chap_pattern, url)
+        if match and ((match.group(1) and match.group(3)) or (not match.group(1) and not match.group(3))):
+            chapter_url_index = self.chapterURLIndex.get(match.group(2))
+            if chapter_url_index is not None:
+                return self.chapterUrls[chapter_url_index]['url']
+        return url
 
     def make_soup(self,data):
         soup = super(RoyalRoadAdapter, self).make_soup(data)
@@ -148,19 +177,25 @@ class RoyalRoadAdapter(BaseSiteAdapter):
 
 
         chapters = soup.find('table',{'id':'chapters'}).find('tbody')
-        tds = [tr.findAll('td')[0] for tr in chapters.findAll('tr')]
-        for td in tds:
-            chapterUrl = 'https://' + self.getSiteDomain() + td.a['href']
-            self.add_chapter(td.text, chapterUrl)
-
+        tds = [tr.findAll('td') for tr in chapters.findAll('tr')]
+        # Links in the RR ToC page are in the normalized long form, so match is simpler than in normalize_chapterurl()
+        chap_pattern_long = r"https?://(?:www\.)?royalroadl?\.com/fiction/\d+/[^/]+/chapter/(\d+)/[^/]+/?$"
+        for chapter,date in tds:
+            chapterUrl = 'https://' + self.getSiteDomain() + chapter.a['href']
+            chapterDate = self.make_date(date)
+            format = self.getConfig("datechapter_format", self.getConfig("datePublished_format", self.dateformat))
+            if self.add_chapter(chapter.text, chapterUrl, {'date': chapterDate.strftime(format)}):
+                match = re.match(chap_pattern_long, chapterUrl)
+                if match:
+                    chapter_id = match.group(1)
+                    self.chapterURLIndex[chapter_id] = len(self.chapterUrls) - 1
 
         # this is forum based so it's a bit ugly
         description = soup.find('div', {'property': 'description', 'class': 'hidden-content'})
         self.setDescription(url,description)
 
-        dates = [tr.findAll('td')[1] for tr in chapters.findAll('tr')]
-        self.story.setMetadata('dateUpdated', self.make_date(dates[-1]))
-        self.story.setMetadata('datePublished', self.make_date(dates[0]))
+        self.story.setMetadata('dateUpdated', self.make_date(tds[-1][1]))
+        self.story.setMetadata('datePublished', self.make_date(tds[0][1]))
 
         for a in soup.find_all('a',{'property':'genre'}): # not all stories have genre
             genre = stripHTML(a)
@@ -198,7 +233,9 @@ class RoyalRoadAdapter(BaseSiteAdapter):
         img = soup.find(None,{'class':'row fic-header'}).find('img')
         if img:
             cover_url = img['src']
-            self.setCoverImage(url,cover_url)
+            # usually URL is for thumbnail. Try expected URL for larger image, if fails fall back to the original URL
+            if self.setCoverImage(url,cover_url.replace('/covers-full/', '/covers-large/'))[0] == "failedtoload":
+                self.setCoverImage(url,cover_url)
                     # some content is show as tables, this will preserve them
 
         itag = soup.find('i',title='Story Length')

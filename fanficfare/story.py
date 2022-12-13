@@ -454,6 +454,167 @@ def make_replacements(replace):
     # print("replace lines:%s"%len(retval))
     return retval
 
+def make_chapter_text_replacements(replace):
+    retval=[]
+    for repl_line in replace.splitlines():
+        line=repl_line
+        try:
+            (regexp,replacement)=(None,None)
+            if "=>" in line:
+                parts = line.split("=>")
+                (regexp,replacement)=parts
+
+            if regexp:
+                regexp = re_compile(regexp,line)
+                # A way to explicitly include spaces in the
+                # replacement string.  The .ini parser eats any
+                # trailing spaces.
+                replacement=replacement\
+                    .replace(SPACE_REPLACE,' ')
+
+                retval.append([repl_line,regexp,replacement])
+        except Exception as e:
+            logger.error("Problem with Chapter Text Replacement Line:%s"%repl_line)
+            raise exceptions.PersonalIniFailed(e,'replace_chapter_text unpacking failed',repl_line)
+#            raise
+    # print("replace lines:%s"%len(retval))
+    return retval
+
+class StoryImage(dict):
+    pass
+
+class ImageStore:
+    def __init__(self):
+        self.prefix='ffdl'
+        self.cover_name='cover'
+
+        ## list of dicts, one per image
+        self.infos=[]
+        ## index of image urls, not including cover.
+        self.url_index={}
+        ## dict of img sizes -> lists of info dicts
+        ## size_index contains list for case of different images of same size.
+        self.size_index=defaultdict(list)
+        self.cover = None
+
+    # returns newsrc
+    def add_img(self,url,ext,mime,data,cover=False,):
+        info = {'url':url,
+                #'newsrc':newsrc,
+                'mime':mime,
+                'data':data}
+        if cover:
+            info['newsrc'] = "images/%s.%s"%(self.cover_name,ext)
+            if self.cover and 'cover' in self.infos[0]['newsrc']:
+                # remove previously set cover, if present.  Should
+                # have only come from first image.  Double checking
+                # newsrc is paranoia and could possibly cause a
+                # problem if it ever changes.
+                del self.infos[0]
+            self.infos.insert(0,info)
+            self.cover = info
+        else:
+            info['newsrc'] = "images/%s-%s.%s"%(
+                self.prefix,
+                len(self.url_index),
+                ext)
+            self.infos.append(info)
+            self.url_index[url]=info
+            self.size_index[len(data)].append(info)
+        return info['newsrc']
+
+    def get_img_by_url(self,url):
+        return self.url_index.get(url,None)
+
+    def get_imgs_by_size(self,size):
+        return self.size_index[size]
+
+    def get_imgs(self):
+        return self.infos
+
+    def debug_out(self):
+        pass
+        # logger.debug(self.url_index.keys())
+        # logger.debug(self.size_index.keys())
+        # logger.debug("\n"+("\n".join([ x['newsrc'] for x in self.infos])))
+
+
+class MetadataCache:
+    def __init__(self):
+        # save processed metadata, dicts keyed by 'key', then (removeentities,dorepl)
+        # {'key':{(removeentities,dorepl):"value",(...):"value"},'key':... }
+        self.processed_metadata_cache = {}
+        ## not entirely sure now why lists are separate, but I assume
+        ## there was a reason.
+        self.processed_metadata_list_cache = {}
+
+        ## lists of entries that depend on key value--IE, the ones
+        ## that should also be cache invalided when key is.
+        # {'key':['name','name',...]
+        self.dependent_entries = {}
+
+    def clear(self):
+        self.processed_metadata_cache = {}
+        self.processed_metadata_list_cache = {}
+
+    def invalidate(self,key,seen_list={}):
+        # logger.debug("invalidate(%s)"%key)
+        # logger.debug("seen_list(%s)"%seen_list)
+        if key in seen_list:
+            raise exceptions.CacheCleared('replace all')
+        try:
+            new_seen_list = dict(seen_list)
+            new_seen_list[key]=True
+            if key in self.processed_metadata_cache:
+                del self.processed_metadata_cache[key]
+            if key in self.processed_metadata_list_cache:
+                del self.processed_metadata_list_cache[key]
+
+            for entry in self.dependent_entries.get(key,[]):
+                ## replace_metadata lines without keys apply to all
+                ## entries--special key '' used to clear deps on *all*
+                ## cache sets.
+                if entry == '':
+                    # logger.debug("clear in invalidate(%s)"%key)
+                    raise exceptions.CacheCleared('recursed')
+                self.invalidate(entry,new_seen_list)
+        except exceptions.CacheCleared as e:
+            # logger.debug(e)
+            self.clear()
+        # logger.debug(self.dependent_entries)
+
+    def add_dependencies(self,include_key,list_keys):
+        for key in list_keys:
+            if key not in self.dependent_entries:
+                self.dependent_entries[key] = set()
+            self.dependent_entries[key].add(include_key)
+
+    def set_cached_scalar(self,key,removeallentities,doreplacements,value):
+        if key not in self.processed_metadata_cache:
+            self.processed_metadata_cache[key] = {}
+        self.processed_metadata_cache[key][(removeallentities,doreplacements)] = value
+
+    def is_cached_scalar(self,key,removeallentities,doreplacements):
+        return key in self.processed_metadata_cache \
+            and (removeallentities,doreplacements) in self.processed_metadata_cache[key]
+
+    def get_cached_scalar(self,key,removeallentities,doreplacements):
+        return self.processed_metadata_cache[key][(removeallentities,doreplacements)]
+
+
+    def set_cached_list(self,key,removeallentities,doreplacements,value):
+        if key not in self.processed_metadata_list_cache:
+            self.processed_metadata_list_cache[key] = {}
+        self.processed_metadata_list_cache[key][(removeallentities,doreplacements)] = value
+
+    def is_cached_list(self,key,removeallentities,doreplacements):
+        return key in self.processed_metadata_list_cache \
+            and (removeallentities,doreplacements) in self.processed_metadata_list_cache[key]
+
+    def get_cached_list(self,key,removeallentities,doreplacements):
+        return self.processed_metadata_list_cache[key][(removeallentities,doreplacements)]
+
+
 class Story(Requestable):
 
     def __init__(self, configuration):
@@ -465,17 +626,21 @@ class Story(Requestable):
             self.metadata = {'version':'unknown'}
         self.metadata['python_version']=sys.version
         self.replacements = []
+        self.chapter_text_replacements = []
         self.in_ex_cludes = {}
         self.chapters = [] # chapters will be dict containing(url,title,html,etc)
         self.chapter_first = None
         self.chapter_last = None
-        self.imgurls = []
-        self.imginfo = []
-        self.imgsizes = defaultdict(list) # dict of img sizes -> lists of self.imginfo indices
-        # save processed metadata, dicts keyed by 'key', then (removeentities,dorepl)
-        # {'key':{(removeentities,dorepl):"value",(...):"value"},'key':... }
-        self.processed_metadata_cache = {}
-        self.processed_metadata_list_cache = {}
+
+        self.img_store = ImageStore()
+
+        self.metadata_cache = MetadataCache()
+
+        ## set include_in_ cache dependencies
+        for entry in self.getValidMetaList():
+            if self.hasConfig("include_in_"+entry):
+                self.metadata_cache.add_dependencies(entry,
+                  [ k.replace('.NOREPL','') for k in self.getConfigList("include_in_"+entry) ])
 
         self.cover=None # *href* of new cover image--need to create html.
         self.oldcover=None # (oldcoverhtmlhref,oldcoverhtmltype,oldcoverhtmldata,oldcoverimghref,oldcoverimgtype,oldcoverimgdata)
@@ -483,6 +648,7 @@ class Story(Requestable):
         self.logfile=None # cheesy way to carry log file forward across update.
 
         self.replacements_prepped = False
+        self.chapter_text_replacements_prepped = False
 
         self.chapter_error_count = 0
 
@@ -502,6 +668,19 @@ class Story(Requestable):
 
             self.replacements =  make_replacements(self.getConfig('replace_metadata'))
 
+            ## set replace_metadata conditional key cache dependencies
+            for replaceline in self.replacements:
+                (repl_line,metakeys,regexp,replacement,cond_match) = replaceline
+                ## replace_metadata lines without keys apply to all
+                ## entries--special key '' used to clear deps on *all*
+                ## cache sets.
+                if not metakeys:
+                    metakeys = ['']
+                for key in metakeys:
+                    if cond_match:
+                        self.metadata_cache.add_dependencies(key.replace('_LIST',''),
+                                                             [ cond_match.key() ])
+
             in_ex_clude_list = ['include_metadata_pre','exclude_metadata_pre',
                                 'include_metadata_post','exclude_metadata_post']
             for ie in in_ex_clude_list:
@@ -512,9 +691,15 @@ class Story(Requestable):
                     self.in_ex_cludes[ie] = set_in_ex_clude(ies)
             self.replacements_prepped = True
 
+            for which in self.in_ex_cludes.values():
+                for (line,match,cond_match) in which:
+                    for key in match.keys:
+                        if cond_match:
+                            self.metadata_cache.add_dependencies(key.replace('_LIST',''),
+                                                                 [ cond_match.key() ])
+
     def clear_processed_metadata_cache(self):
-        self.processed_metadata_cache = {}
-        self.processed_metadata_list_cache = {}
+        self.metadata_cache.clear()
 
     def set_chapters_range(self,first=None,last=None):
         self.chapter_first=first
@@ -526,8 +711,8 @@ class Story(Requestable):
     def setMetadata(self, key, value, condremoveentities=True):
 
         # delete cached replace'd value.
-        if key in self.processed_metadata_cache:
-            del self.processed_metadata_cache[key]
+        self.metadata_cache.invalidate(key)
+
         # Fixing everything downstream to handle bool primatives is a
         # pain.
         if isinstance(value,bool):
@@ -625,7 +810,7 @@ class Story(Requestable):
                 # huuuge replace list cause a problem.  Also allows dict()
                 # instead of list() for quicker lookups.
                 if repl_line in seen_list:
-                    logger.info("Skipping replace_metadata line %s to prevent infinite recursion."%repl_line)
+                    logger.info("Skipping replace_metadata line '%s' on %s to prevent infinite recursion."%(repl_line,key))
                     continue
                 doreplace=True
                 if cond_match and cond_match.key() != key: # prevent infinite recursion.
@@ -753,6 +938,8 @@ class Story(Requestable):
             value = url_chapters - (int(self.chapter_first) - 1)
         if self.chapter_last:
             value = value - (url_chapters - int(self.chapter_last))
+        if value < 1:
+            raise exceptions.FailedToDownload("No chapters to download after chapter range/-b/-e and ignore_chapter_url_list applied")
         return value
 
     def getMetadataRaw(self,key):
@@ -764,9 +951,8 @@ class Story(Requestable):
                     doreplacements=True,
                     seen_list={}):
         # check for a cached value to speed processing
-        if key in self.processed_metadata_cache \
-                and (removeallentities,doreplacements) in self.processed_metadata_cache[key]:
-            return self.processed_metadata_cache[key][(removeallentities,doreplacements)]
+        if self.metadata_cache.is_cached_scalar(key,removeallentities,doreplacements):
+            return self.metadata_cache.get_cached_scalar(key,removeallentities,doreplacements)
 
         value = None
         if not self.isValidMetaEntry(key):
@@ -810,9 +996,7 @@ class Story(Requestable):
             value = self.getConfig("default_value_"+key)
 
         # save a cached value to speed processing
-        if key not in self.processed_metadata_cache:
-            self.processed_metadata_cache[key] = {}
-        self.processed_metadata_cache[key][(removeallentities,doreplacements)] = value
+        self.metadata_cache.set_cached_scalar(key,removeallentities,doreplacements,value)
 
         return value
 
@@ -923,8 +1107,9 @@ class Story(Requestable):
             self.addToList(listname,v.strip())
 
     def addToList(self,listname,value,condremoveentities=True,clear=False):
-        if listname in self.processed_metadata_list_cache:
-            del self.processed_metadata_list_cache[listname]
+        # delete cached replace'd value.
+        self.metadata_cache.invalidate(listname)
+
         if value==None:
             return
         if condremoveentities:
@@ -952,9 +1137,8 @@ class Story(Requestable):
         retlist = []
 
         # check for a cached value to speed processing
-        if not skip_cache and listname in self.processed_metadata_list_cache \
-                and (removeallentities,doreplacements) in self.processed_metadata_list_cache[listname]:
-            return self.processed_metadata_list_cache[listname][(removeallentities,doreplacements)]
+        if not skip_cache and self.metadata_cache.is_cached_list(listname,removeallentities,doreplacements):
+            return self.metadata_cache.get_cached_list(listname,removeallentities,doreplacements)
 
         if not self.isValidMetaEntry(listname):
             retlist = []
@@ -1019,14 +1203,16 @@ class Story(Requestable):
             ## there's more than one category value.  Does not work
             ## consistently well if you try to include_in_ chain genre
             ## back into category--breaks with fandoms sites like AO3
-            if listname == 'genre' and self.getConfig('add_genre_when_multi_category') and len(self.getList('category',
-                                                                                                            removeallentities=False,
-                                                                                                            # to avoid inf loops if genre/cat substs
-                                                                                                            includelist=includelist+[listname],
-                                                                                                            doreplacements=False,
-                                                                                                            skip_cache=True,
-                                                                                                            seen_list=seen_list
-                                                                                                            )) > 1:
+            if( listname == 'genre' and self.getConfig('add_genre_when_multi_category')
+                and len(self.getList('category',
+                                     removeallentities=False,
+                                     # to avoid inf loops if genre/cat substs
+                                     includelist=includelist+[listname],
+                                     doreplacements=False,
+                                     skip_cache=True,
+                                     seen_list=seen_list
+                                     )) > 1
+                and self.getConfig('add_genre_when_multi_category') not in retlist ):
                 retlist.append(self.getConfig('add_genre_when_multi_category'))
 
             if retlist:
@@ -1051,22 +1237,29 @@ class Story(Requestable):
                     # remove dups and sort.
                     retlist = sorted(list(set(retlist)))
 
-                    ## Add value of add_genre_when_multi_category to
-                    ## category if there's more than one category
-                    ## value (before this, obviously).  Applied
-                    ## *after* doReplacements.  For normalization
-                    ## crusaders who want Crossover as a category
-                    ## instead of genre.  Moved after dedup'ing so
-                    ## consolidated category values don't count.
-                    if listname == 'category' and self.getConfig('add_category_when_multi_category') and len(retlist) > 1:
-                        retlist.append(self.getConfig('add_category_when_multi_category'))
+                ## Add value of add_genre_when_multi_category to
+                ## category if there's more than one category
+                ## value (before this, obviously).  Applied
+                ## *after* doReplacements.  For normalization
+                ## crusaders who want Crossover as a category
+                ## instead of genre.  Moved after dedup'ing so
+                ## consolidated category values don't count.
+                if( listname == 'category'
+                    and self.getConfig('add_category_when_multi_category')
+                    and len(retlist) > 1
+                    and self.getConfig('add_category_when_multi_category') not in retlist ):
+                    retlist.append(self.getConfig('add_category_when_multi_category'))
+                    ## same sort as above, but has to be after due to
+                    ## changing list. unique filter not needed: 'not
+                    ## in retlist' check
+                    if not (listname in ('author','authorUrl','authorId') or self.getConfig('keep_in_order_'+listname)):
+                        retlist = sorted(list(set(retlist)))
+
             else:
                 retlist = []
 
         if not skip_cache:
-            if listname not in self.processed_metadata_list_cache:
-                self.processed_metadata_list_cache[listname] = {}
-            self.processed_metadata_list_cache[listname][(removeallentities,doreplacements)] = retlist
+            self.metadata_cache.set_cached_list(listname,removeallentities,doreplacements,retlist)
 
         return retlist
 
@@ -1172,8 +1365,25 @@ class Story(Requestable):
             chapter['toctitle'] = toctempl.substitute(chapter)
             # set after, otherwise changes origtitle and toctitle
             chapter['title'] = chapter['chapter']
+            ## chapter['html'] is a string.
+            chapter['html'] = self.do_chapter_text_replacements(chapter['html'])
             retval.append(chapter)
         return retval
+
+    def do_chapter_text_replacements(self,data):
+        '''
+        'Undocumented' feature.  This is a shotgun with a stirrup on
+        the end--you *will* shoot yourself in the foot a lot with it.
+        '''
+        # only compile chapter_text_replacements once.
+        if not self.chapter_text_replacements and self.getConfig('replace_chapter_text'):
+            self.chapter_text_replacements = make_chapter_text_replacements(self.getConfig('replace_chapter_text'))
+            logger.debug(self.chapter_text_replacements)
+        for replaceline in self.chapter_text_replacements:
+            (repl_line,regexp,replacement) = replaceline
+            if regexp.search(data):
+                data = regexp.sub(replacement,data)
+        return data
 
     def get_filename_safe_metadata(self,pattern=None):
         origvalues = self.getAllMetadata()
@@ -1204,6 +1414,7 @@ class Story(Requestable):
     # pass fetch in from adapter in case we need the cookies collected
     # as well as it's a base_story class method.
     def addImgUrl(self,parenturl,url,fetch,cover=False,coverexclusion=None):
+        logger.debug("addImgUrl(parenturl=%s,url=%s,cover=%s,coverexclusion=%s"%(parenturl,url,cover,coverexclusion))
         # otherwise it saves the image in the epub even though it
         # isn't used anywhere.
         if cover and self.getConfig('never_make_cover'):
@@ -1266,9 +1477,9 @@ class Story(Requestable):
         if cover and coverexclusion and re.search(coverexclusion,imgurl):
             return (None,None)
 
-        prefix='ffdl'
-        if imgurl not in self.imgurls:
-
+        self.img_store.debug_out()
+        imginfo = self.img_store.get_img_by_url(imgurl)
+        if not imginfo:
             try:
                 if imgurl.endswith('failedtoload'):
                     return ("failedtoload","failedtoload")
@@ -1318,31 +1529,28 @@ class Story(Requestable):
 
             # explicit cover, make the first image.
             if cover and self.check_cover_min_size(data):
-                if len(self.imginfo) > 0 and 'cover' in self.imginfo[0]['newsrc']:
-                    # remove existing cover, if there is one.
-                    # could have only come from first image and is assumed index 0.
-                    del self.imgurls[0]
-                    del self.imginfo[0]
-                self.imgurls.insert(0,imgurl)
-                newsrc = "images/cover.%s"%ext
+                self.img_store.debug_out()
+                newsrc = self.img_store.add_img(imgurl,
+                                                ext,
+                                                mime,
+                                                data,
+                                                cover=True)
                 self.cover=newsrc
                 self.setMetadata('cover_image','specific')
-                self.imginfo.insert(0,{'newsrc':newsrc,'mime':mime,'data':data})
                 ## *Don't* include cover in imgsizes because it can be
                 ## replaced by Calibre etc.  So don't re-use it.
                 ## Also saves removing it above.
                 # self.imgsizes[len(data)].append(0)
             else:
                 if self.getConfig('dedup_img_files',False):
-                    same_sz_imgs = self.imgsizes[len(data)]
+                    same_sz_imgs = self.img_store.get_imgs_by_size(len(data))
                     for szimg in same_sz_imgs:
-                        if data == self.imginfo[szimg]['data']:
+                        if data == szimg['data']:
                             # matching data, duplicate file with a different URL.
-                            logger.debug("found duplicate image: %s, %s"%(self.imginfo[szimg]['newsrc'],
-                                                                          self.imgurls[szimg]))
-                            return (self.imginfo[szimg]['newsrc'],
-                                    self.imgurls[szimg])
-                self.imgurls.append(imgurl)
+                            logger.info("found duplicate image: %s, %s"%(szimg['newsrc'],
+                                                                         szimg['url']))
+                            return (szimg['newsrc'],szimg['url'])
+                self.img_store.debug_out()
                 # First image, copy not link because calibre will replace with it's cover.
                 # Only if: No cover already AND
                 #          make_firstimage_cover AND
@@ -1353,25 +1561,28 @@ class Story(Requestable):
                         not self.getConfig('never_make_cover') and \
                         not (coverexclusion and re.search(coverexclusion,imgurl)) and \
                         self.check_cover_min_size(data):
-                    newsrc = "images/cover.%s"%ext
+                    logger.debug("make_firstimage_cover")
+                    newsrc = self.img_store.add_img(imgurl,
+                                                    ext,
+                                                    mime,
+                                                    data,
+                                                    cover=True)
                     self.cover=newsrc
                     self.setMetadata('cover_image','first')
-                    self.imginfo.append({'newsrc':newsrc,'mime':mime,'data':data})
-                    self.imgurls.append(imgurl)
+                    self.img_store.debug_out()
                     ## *Don't* include cover in imgsizes because it can be
                     ## replaced by Calibre etc.  So don't re-use it.
                     # self.imgsizes[len(data)].append(len(self.imginfo)-1)
 
-                newsrc = "images/%s-%s.%s"%(
-                    prefix,
-                    self.imgurls.index(imgurl),
-                    ext)
-                self.imginfo.append({'newsrc':newsrc,'mime':mime,'data':data})
-                self.imgsizes[len(data)].append(len(self.imginfo)-1)
+                newsrc = self.img_store.add_img(imgurl,
+                                                ext,
+                                                mime,
+                                                data)
 
-            # logger.debug("\n===============\nimgurl:%s\nnewsrc:%s\nimage size:%d %s\n============"%(imgurl,newsrc,len(data),self.imgsizes[len(data)]))
         else:
-            newsrc = self.imginfo[self.imgurls.index(imgurl)]['newsrc']
+            self.img_store.debug_out()
+            logger.debug("existing image url found:%s->%s"%(imgurl,imginfo['newsrc']))
+            newsrc = imginfo['newsrc']
 
         return (newsrc, imgurl)
 
@@ -1393,9 +1604,8 @@ class Story(Requestable):
 
     def getImgUrls(self):
         retlist = []
-        for i, url in enumerate(self.imgurls):
-            #parsedUrl = urlparse(url)
-            retlist.append(self.imginfo[i])
+        for i, info in enumerate(self.img_store.get_imgs()):
+            retlist.append(info)
         for imgfn in self.getConfigList('additional_images'):
             data = self.get_request_raw(imgfn)
             (discarddata,ext,mime) = no_convert_image(imgfn,data)

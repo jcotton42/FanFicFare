@@ -110,6 +110,7 @@ class BaseXenForo2ForumAdapter(BaseXenForoForumAdapter):
             # logger.debug(desc)
             title = header.find('h1',{'class':'threadmarkListingHeader-name'})
             if title:
+                title.a.decompose() # remove RSS link.
                 self.story.setMetadata("threadmarks_title",stripHTML(title))
             statusdt = header.find('dt',text="Index progress")
             if statusdt:
@@ -120,7 +121,7 @@ class BaseXenForo2ForumAdapter(BaseXenForoForumAdapter):
                     if self.getConfig('use_threadmarks_status'):
                         if 'Complete' in threadmarks_status:
                             self.story.setMetadata('status','Completed')
-                        elif 'Incomplete' in threadmarks_status:
+                        elif 'Incomplete' in threadmarks_status or 'Ongoing' in threadmarks_status:
                             self.story.setMetadata('status','In-Progress')
                         else:
                             self.story.setMetadata('status',threadmarks_status)

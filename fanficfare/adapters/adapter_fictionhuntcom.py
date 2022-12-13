@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright 2019 FanFicFare team
+# Copyright 2022 FanFicFare team
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,6 +25,93 @@ from ..htmlcleanup import stripHTML
 # py2 vs py3 transition
 
 from .base_adapter import BaseSiteAdapter,  makeDate
+
+ampfandoms = ["A Falcone & Driscoll Investigation",
+              "Alias Smith & Jones",
+              "Atelier Escha & Logy",
+              "Austin & Ally",
+              "Baby & Me/赤ちゃんと僕",
+              "Barney & Friends",
+              "Between Love & Goodbye",
+              "Beyond Good & Evil",
+              "Bill & Ted's Excellent Adventure/Bogus Journey",
+              "BLACK & WHITE",
+              "Bonnie & Clyde",
+              "Brandy & Mr. Whiskers",
+              "Brothers & Sisters",
+              "Bucket & Skinner's Epic Adventures",
+              "Calvin & Hobbes",
+              "Cats & Dogs",
+              "Command & Conquer",
+              "Devil & Devil",
+              "Dharma & Greg",
+              "Dicky & Dawn",
+              "Drake & Josh",
+              "Edgar & Ellen",
+              "Franklin & Bash",
+              "Gabby Duran & The Unsittables",
+              "Girls und Panzer/ガールズ&パンツァー",
+              "Gnomeo & Juliet",
+              "Grim Adventures of Billy & Mandy",
+              "Half & Half/ハーフ・アンド・ハーフ",
+              "Hansel & Gretel",
+              "Hatfields & McCoys",
+              "High & Low - The Story of S.W.O.R.D.",
+              "Home & Away",
+              "Hudson & Rex",
+              "Huntik: Secrets & Seekers",
+              "Imagine Me & You",
+              "Jekyll & Hyde",
+              "Jonathan Strange & Mr. Norrell",
+              "Knight's & Magic/ナイツ＆マジック",
+              "Law & Order: Los Angeles",
+              "Law & Order: Organized Crime",
+              "Lilo & Stitch",
+              "Locke & Key",
+              "Lockwood & Co.",
+              "Lost & Found Music Studios",
+              "Lu & Og",
+              "Me & My Brothers",
+              "Melissa & Joey",
+              "Mickey Mouse & Friends",
+              "Mike & Molly",
+              "Mike, Lu & Og",
+              "Miraculous: Tales of Ladybug & Cat Noir",
+              "Mork & Mindy",
+              "Mount&Blade",
+              "Mr. & Mrs. Smith",
+              "Mr. Peabody & Sherman",
+              "Muhyo & Roji",
+              "Nicky, Ricky, Dicky & Dawn",
+              "Oliver & Company",
+              "Ozzy & Drix",
+              "Panty & Stocking with Garterbelt/パンティ＆ストッキングwithガーターベルト",
+              "Penryn & the End of Days",
+              "Prep & Landing",
+              "Prince & Hero/王子とヒーロー",
+              "Prince & Me",
+              "Puzzle & Dragons",
+              "Ren & Stimpy Show",
+              "Rizzoli & Isles",
+              "Romeo & Juliet",
+              "Rosemary & Thyme",
+              "Sam & Cat",
+              "Sam & Max",
+              "Sapphire & Steel",
+              "Scott & Bailey",
+              "Shakespeare & Hathaway: Private Investigators",
+              "Soul Nomad & the World Eaters",
+              "Superman & Lois",
+              "Tiger & Bunny/タイガー＆バニー",
+              "Trains & Automobiles",
+              "Upin & Ipin",
+              "Wallace & Gromit",
+              "Witch & Wizard",
+              "Wolverine & the X-Men",
+              "Yotsuba&!/よつばと！",
+              "Young & Hungry",
+              ]
+
 
 class FictionHuntComSiteAdapter(BaseSiteAdapter):
 
@@ -57,7 +144,7 @@ class FictionHuntComSiteAdapter(BaseSiteAdapter):
 
         # The date format will vary from site to site.
         # http://docs.python.org/library/datetime.html#strftime-strptime-behavior
-        self.dateformat = "%d %b %Y"
+        self.dateformat = "%Y-%m-%d %H:%M:%S"
 
     @staticmethod
     def getSiteDomain():
@@ -145,6 +232,7 @@ class FictionHuntComSiteAdapter(BaseSiteAdapter):
             self._setURL(soup.select_one("div.Story__details a")['href'])
             url = self.url
 
+        # logger.debug(data)
         self.story.setMetadata('title',stripHTML(soup.find('h1',{'class':'Story__title'})))
 
         summhead = soup.find('h5',text='Summary')
@@ -156,10 +244,23 @@ class FictionHuntComSiteAdapter(BaseSiteAdapter):
         self.story.setMetadata('authorUrl',autha['href'])
         self.story.setMetadata('author',autha.string)
 
+        updlab = soup.find('label',text='Last Updated:')
+        if updlab:
+            update = updlab.find_next('time')['datetime']
+            self.story.setMetadata('dateUpdated', makeDate(update, self.dateformat))
+
+        publab = soup.find('label',text='Published:')
+        if publab:
+            pubdate = publab.find_next('time')['datetime']
+            self.story.setMetadata('datePublished', makeDate(pubdate, self.dateformat))
+
         ## need author page for some metadata.
         authsoup = None
         authpagea = autha
         authstorya = None
+
+        ## Rating and exact word count doesn't appear on the summary
+        ## page, try to get from author page.
 
         ## find story url, might need to spin through author's pages.
         while authpagea and not authstorya:
@@ -167,23 +268,12 @@ class FictionHuntComSiteAdapter(BaseSiteAdapter):
             authpagea = authsoup.find('a',{'rel':'next'})
             # CSS selectors don't allow : or / unquoted, which
             # BS4(and dependencies) didn't used to enforce.
-            authstorya = authsoup.select('h4.Story__item-title a[href="%s"]'%self.url)
+            authstorya = authsoup.select_one('h4.Story__item-title a[href="%s"]'%self.url)
 
         if not authstorya:
             raise exceptions.FailedToDownload("Error finding %s on author page(s)" % self.url)
 
-        meta = authstorya[0].parent.parent.select("div.Story__meta-info")[0]
-        ## remove delimiters
-        for span in authstorya[0].parent.parent.select("div.Story__meta-info span.delimiter"):
-            span.extract()
-        meta.find('span').extract() # discard author link
-
-        update = stripHTML(meta.find('span').extract()).split(':')[1].strip()
-        self.story.setMetadata('dateUpdated', makeDate(update, self.dateformat))
-
-        pubdate = stripHTML(meta.find('span').extract()).split(':')[1].strip()
-        self.story.setMetadata('datePublished', makeDate(pubdate, self.dateformat))
-
+        meta = authstorya.find_parent('li').find('div',class_='Story__meta-info')
         meta=meta.text.split()
         self.story.setMetadata('numWords',meta[meta.index('words')-1])
         self.story.setMetadata('rating',meta[meta.index('Rating:')+1])
@@ -209,8 +299,30 @@ class FictionHuntComSiteAdapter(BaseSiteAdapter):
         for a in soup.select('a[href*="pairings="]'):
             self.story.addToList('ships',stripHTML(a).replace("+","/"))
 
-        for chapa in soup.select('ul.StoryContents__chapters a'):
-            self.add_chapter(stripHTML(chapa.find('span',{'class':'chapter-title'})),chapa['href'])
+        for a in soup.select('div.Story__type a[href*="fandoms="]'):
+            # logger.debug(a)
+            fandomstr=stripHTML(a).replace(' Fanfiction','').strip()
+            # logger.debug("'%s'"%fandomstr)
+            ## haven't thought of a better way to detect and *not*
+            ## split on fandoms with a '&' in them.
+            for ampfandom in ampfandoms:
+                if ampfandom in fandomstr:
+                    self.story.addToList('category',ampfandom)
+                    fandomstr = fandomstr.replace(ampfandom,'')
+            for fandom in fandomstr.split('&'):
+                if fandom:
+                    self.story.addToList('category',fandom)
+
+        ## Currently no 'Original' stories on the site, but does list
+        ## it as a search type.  Set extratags: and uncomment this if
+        ## and when.
+        # if self.story.getList('category'):
+        #     self.story.addToList('category', 'FanFiction')
+        # else:
+        #     self.story.addToList('category', 'Original')
+
+        for chapli in soup.select('ul.StoryContents__chapters li'):
+            self.add_chapter(stripHTML(chapli.select_one('span.chapter-title')),chapli.select_one('a')['href'])
 
         if self.num_chapters() == 0:
             raise exceptions.FailedToDownload("Story at %s has no chapters." % self.url)

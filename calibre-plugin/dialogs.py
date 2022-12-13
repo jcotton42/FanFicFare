@@ -22,13 +22,17 @@ from PyQt5.Qt import (QApplication, QDialog, QWidget, QTableWidget, QVBoxLayout,
                       QGridLayout, QPushButton, QFont, QLabel, QCheckBox, QIcon,
                       QLineEdit, QComboBox, QProgressDialog, QTimer, QDialogButtonBox,
                       QScrollArea, QPixmap, Qt, QAbstractItemView, QTextEdit,
-                      pyqtSignal, QGroupBox, QFrame)
+                      pyqtSignal, QGroupBox, QFrame, QTextCursor)
 try:
     # qt6 Calibre v6+
     QTextEditNoWrap = QTextEdit.LineWrapMode.NoWrap
+    MoveOperations = QTextCursor.MoveOperation
+    MoveMode = QTextCursor.MoveMode
 except:
     # qt5 Calibre v2-5
     QTextEditNoWrap = QTextEdit.NoWrap
+    MoveOperations = QTextCursor
+    MoveMode = QTextCursor
 
 from calibre.gui2 import gprefs
 show_download_options = 'fff:add new/update dialogs:show_download_options'
@@ -212,19 +216,25 @@ class AddNewDialog(SizePersistedDialog):
         self.toplabel=QLabel("Toplabel")
         self.l.addWidget(self.toplabel)
 
-        ## XXX add labels for series name and desc? Desc in tooltip?
-        row = 0
+        ## scrollable area for lengthy series comments.
+        scrollable = QScrollArea()
+        scrollcontent = QWidget()
+        scrollable.setWidget(scrollcontent)
+        scrollable.setWidgetResizable(True)
+        self.l.addWidget(scrollable)
+
         grid = QGridLayout()
+        scrollcontent.setLayout(grid)
+        self.mergeshow.append(scrollable)
+
+        row = 0
         label = QLabel('<b>'+_('Series')+':</b>')
         grid.addWidget(label,row,0)
         self.mergedname=QLabel("mergedname")
         tt = _('This name will be used with the %s setting to set the title of the new book.')%'<i>anthology_title_pattern</i>'
         label.setToolTip(tt)
-        self.mergeshow.append(label)
         self.mergedname.setToolTip(tt)
         grid.addWidget(self.mergedname,row,1,1,-1)
-        self.l.addLayout(grid)
-        self.mergeshow.append(self.mergedname)
 
         row+=1
         label = QLabel('<b>'+_('Comments')+':</b>')
@@ -232,18 +242,15 @@ class AddNewDialog(SizePersistedDialog):
         self.mergeddesc=QLabel("mergeddesc")
         tt = _('These comments about the series will be included in the Comments of the new book.')+'<i></i>' # for html for auto-wrap
         label.setToolTip(tt)
-        self.mergeshow.append(label)
         self.mergeddesc.setToolTip(tt)
         self.mergeddesc.setWordWrap(True)
         grid.addWidget(self.mergeddesc,row,1,1,-1)
-        self.l.addLayout(grid)
-        self.mergeshow.append(self.mergeddesc)
         grid.setColumnStretch(1,1)
 
         self.url = DroppableQTextEdit(self)
         self.url.setToolTip("UrlTooltip")
         self.url.setLineWrapMode(QTextEditNoWrap)
-        self.l.addWidget(self.url)
+        self.l.addWidget(self.url,1) # 1 higher 'stretch'==higher priority
 
         self.groupbox = QGroupBox(_("Show Download Options"))
         self.groupbox.setCheckable(True)
@@ -306,12 +313,6 @@ class AddNewDialog(SizePersistedDialog):
         horz.addWidget(self.updatemeta)
         self.mergehide.append(self.updatemeta)
         self.mergeupdateshow.append(self.updatemeta)
-
-        self.updateepubcover = QCheckBox(_('Update EPUB Cover?'),self)
-        self.updateepubcover.setToolTip(_('Update book cover image from site or defaults (if found) <i>inside</i> the EPUB when EPUB is updated.'))
-        self.updateepubcover.setChecked(self.prefs['updateepubcover'])
-        horz.addWidget(self.updateepubcover)
-        self.mergehide.append(self.updateepubcover)
 
         self.gbl.addLayout(horz)
 
@@ -442,9 +443,6 @@ class AddNewDialog(SizePersistedDialog):
         self.updatemeta.setChecked(self.prefs['updatemeta'])
         # self.bgmeta.setChecked(self.prefs['bgmeta'])
 
-        if not self.merge:
-            self.updateepubcover.setChecked(self.prefs['updateepubcover'])
-
         self.url.setText(url_list_text)
         if url_list_text:
             self.button_box.button(QDialogButtonBox.Ok).setFocus()
@@ -482,14 +480,12 @@ class AddNewDialog(SizePersistedDialog):
             'collision': unicode(self.collision.currentText()),
             'updatemeta': self.updatemeta.isChecked(),
             'bgmeta': False, # self.bgmeta.isChecked(),
-            'updateepubcover': self.updateepubcover.isChecked(),
             'smarten_punctuation':self.prefs['smarten_punctuation'],
             'do_wordcount':self.prefs['do_wordcount'],
             }
 
         if self.merge:
             retval['fileform']=='epub'
-            retval['updateepubcover']=True
             if self.newmerge:
                 retval['updatemeta']=True
                 retval['collision']=ADDNEW
@@ -623,13 +619,15 @@ def LoopProgressDialog(gui,
                        finish_function,
                        init_label=_("Fetching metadata for stories..."),
                        win_title=_("Downloading metadata for stories"),
-                       status_prefix=_("Fetched metadata for")):
+                       status_prefix=_("Fetched metadata for"),
+                       disable_cancel=False):
     ld = _LoopProgressDialog(gui,
                              book_list,
                              foreach_function,
                              init_label,
                              win_title,
-                             status_prefix)
+                             status_prefix,
+                             disable_cancel)
 
     # Mac OS X gets upset if the finish_function is called from inside
     # the real _LoopProgressDialog class.
@@ -647,7 +645,8 @@ class _LoopProgressDialog(QProgressDialog):
                  foreach_function,
                  init_label=_("Fetching metadata for stories..."),
                  win_title=_("Downloading metadata for stories"),
-                 status_prefix=_("Fetched metadata for")):
+                 status_prefix=_("Fetched metadata for"),
+                 disable_cancel=False):
         QProgressDialog.__init__(self,
                                  init_label,
                                  _('Cancel'), 0, len(book_list), gui)
@@ -658,7 +657,6 @@ class _LoopProgressDialog(QProgressDialog):
         self.status_prefix = status_prefix
         self.i = 0
         self.start_time = datetime.now()
-        self.first = True
 
         # can't import at file load.
         from calibre_plugins.fanficfare_plugin.prefs import prefs
@@ -667,10 +665,26 @@ class _LoopProgressDialog(QProgressDialog):
         self.setLabelText('%s %d / %d' % (self.status_prefix, self.i, len(self.book_list)))
         self.setValue(self.i)
 
+        if disable_cancel:
+            self.setCancelButton(None)
+            self.reject = self.disabled_reject
+            self.closeEvent = self.disabled_closeEvent
+
         ## self.do_loop does QTimer.singleShot on self.do_loop also.
         ## A weird way to do a loop, but that was the example I had.
-        QTimer.singleShot(0, self.do_loop)
+        ## 100 instead of 0 on the first go due to Win10(and later
+        ## qt6) not displaying dialog properly.
+        QTimer.singleShot(100, self.do_loop)
         self.exec_()
+
+    # used when disable_cancel = True
+    def disabled_reject(self):
+        pass
+
+    # used when disable_cancel = True
+    def disabled_closeEvent(self, event):
+        if event.spontaneous():
+            event.ignore()
 
     def updateStatus(self):
         remaining_time_string = ''
@@ -684,15 +698,6 @@ class _LoopProgressDialog(QProgressDialog):
         #print(self.labelText())
 
     def do_loop(self):
-
-        if self.first:
-            ## Windows 10 doesn't want to show the prog dialog content
-            ## until after the timer's been called again.  Something to
-            ## do with cooperative multi threading maybe?
-            ## So this just trips the timer loop an extra time at the start.
-            self.first = False
-            QTimer.singleShot(0, self.do_loop)
-            return
 
         book = self.book_list[self.i]
         try:
@@ -892,11 +897,6 @@ class UpdateExistingDialog(SizePersistedDialog):
         self.updatemeta.setChecked(self.prefs['updatemeta'])
         horz.addWidget(self.updatemeta)
 
-        self.updateepubcover = QCheckBox(_('Update EPUB Cover?'),self)
-        self.updateepubcover.setToolTip(_('Update book cover image from site or defaults (if found) <i>inside</i> the EPUB when EPUB is updated.'))
-        self.updateepubcover.setChecked(self.prefs['updateepubcover'])
-        horz.addWidget(self.updateepubcover)
-
         self.bgmeta = QCheckBox(_('Background Metadata?'),self)
         self.bgmeta.setToolTip(_("Collect Metadata from sites in a Background process.<br />This returns control to you quicker while updating, but you won't be asked for username/passwords or if you are an adult--stories that need those will just fail."))
         self.bgmeta.setChecked(self.prefs['bgmeta'])
@@ -948,7 +948,6 @@ class UpdateExistingDialog(SizePersistedDialog):
             'collision': unicode(self.collision.currentText()),
             'updatemeta': self.updatemeta.isChecked(),
             'bgmeta': self.bgmeta.isChecked(),
-            'updateepubcover': self.updateepubcover.isChecked(),
             'smarten_punctuation':self.prefs['smarten_punctuation'],
             'do_wordcount':self.prefs['do_wordcount'],
             }
@@ -1029,6 +1028,7 @@ class StoryListTableWidget(QTableWidget):
     def remove_selected_rows(self):
         self.setFocus()
         rows = self.selectionModel().selectedRows()
+        rows = sorted(rows, key=lambda x: x.row(), reverse=True)
         if len(rows) == 0:
             return
         message = '<p>'+_('Are you sure you want to remove this book from the list?')
@@ -1037,7 +1037,7 @@ class StoryListTableWidget(QTableWidget):
         if not confirm(message,'fff_delete_item', self):
             return
         first_sel_row = self.currentRow()
-        for selrow in reversed(rows):
+        for selrow in rows:
             self.removeRow(selrow.row())
         if first_sel_row < self.rowCount():
             self.select_and_scroll_to_row(first_sel_row)
@@ -1105,6 +1105,7 @@ class RejectListTableWidget(QTableWidget):
     def remove_selected_rows(self):
         self.setFocus()
         rows = self.selectionModel().selectedRows()
+        rows = sorted(rows, key=lambda x: x.row(), reverse=True)
         if len(rows) == 0:
             return
         message = '<p>'+_('Are you sure you want to remove this URL from the list?')
@@ -1113,7 +1114,7 @@ class RejectListTableWidget(QTableWidget):
         if not confirm(message,'fff_rejectlist_delete_item_again', self):
             return
         first_sel_row = self.currentRow()
-        for selrow in reversed(rows):
+        for selrow in rows:
             self.removeRow(selrow.row())
         if first_sel_row < self.rowCount():
             self.select_and_scroll_to_row(first_sel_row)
@@ -1374,6 +1375,8 @@ class IniTextDialog(SizePersistedDialog):
             self.addCtrlKeyPress(QtCore.Qt.Key_F,self.findFocus)
             self.addCtrlKeyPress(QtCore.Qt.Key_G,self.find)
 
+        self.addCtrlKeyPress(QtCore.Qt.Key_Return,self.accept)
+        self.addCtrlKeyPress(QtCore.Qt.Key_Enter,self.accept) # num pad
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
@@ -1452,7 +1455,7 @@ class IniTextDialog(SizePersistedDialog):
         else:
             # Make the next search start from the begining again
             self.lastStart = 0
-            self.textedit.moveCursor(self.textedit.textCursor().Start)
+            self.textedit.moveCursor(MoveOperations.Start)
 
     def moveCursor(self,start,end):
 
@@ -1464,7 +1467,8 @@ class IniTextDialog(SizePersistedDialog):
 
         # Next we move the Cursor by over the match and pass the KeepAnchor parameter
         # which will make the cursor select the match's text
-        cursor.movePosition(cursor.Right,cursor.KeepAnchor,end - start)
+        cursor.movePosition(MoveOperations.Right,
+                            MoveMode.KeepAnchor,end - start)
 
         # And finally we set this new cursor as the parent's
         self.textedit.setTextCursor(cursor)
@@ -1478,10 +1482,10 @@ class IniTextDialog(SizePersistedDialog):
         cursor.setPosition(0)
 
         # Next we move the Cursor down lineno times
-        cursor.movePosition(cursor.Down,cursor.MoveAnchor,lineno-1)
+        cursor.movePosition(MoveOperations.Down,MoveMode.MoveAnchor,lineno-1)
 
         # Next we move the Cursor to the end of the line
-        cursor.movePosition(cursor.EndOfLine,cursor.KeepAnchor,1)
+        cursor.movePosition(MoveOperations.EndOfLine,MoveMode.KeepAnchor,1)
 
         # And finally we set this new cursor as the parent's
         self.textedit.setTextCursor(cursor)

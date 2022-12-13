@@ -25,7 +25,6 @@ from fanficfare.six import ensure_text, string_types, text_type as unicode
 #             profile.print_stats()
 #     return profiled_func
 
-
 import logging
 logger = logging.getLogger(__name__)
 
@@ -114,7 +113,7 @@ from calibre_plugins.fanficfare_plugin.dialogs import (
     LoopProgressDialog, UserPassDialog, AboutDialog, CollectURLDialog,
     RejectListDialog, EmailPassDialog,
     save_collisions, question_dialog_all,
-    NotGoingToDownload, RejectUrlEntry )
+    NotGoingToDownload, RejectUrlEntry)
 
 # because calibre immediately transforms html into zip and don't want
 # to have an 'if html'.  db.has_format is cool with the case mismatch,
@@ -164,16 +163,14 @@ class FanFicFarePlugin(InterfaceAction):
         base = self.interface_action_base_plugin
         self.version = base.name+" v%d.%d.%d"%base.version
 
-        # Set the icon for this interface action
-        # The get_icons function is a builtin function defined for all your
-        # plugin code. It loads icons from the plugin zip file. It returns
-        # QIcon objects, if you want the actual data, use the analogous
-        # get_resources builtin function.
-
-        # Note that if you are loading more than one icon, for performance, you
-        # should pass a list of names to get_icons. In this case, get_icons
-        # will return a dictionary mapping names to QIcons. Names that
-        # are not found in the zip file will result in null QIcons.
+        # Set the icon for this interface action.
+        # We use our own get_icon, originally inherited from kiwidude,
+        # later extended to allow new cal6 theming of plugins.
+        # For theme creators, use:
+        # FanFicFare/images/icon.png
+        # (optionally)
+        # FanFicFare/images/icon-for-dark-theme.png
+        # FanFicFare/images/icon-for-light-theme.png
         icon = get_icon('images/icon.png')
 
         self.qaction.setText(_('FanFicFare'))
@@ -599,7 +596,6 @@ class FanFicFarePlugin(InterfaceAction):
                         'collision': extraoptions.get('collision',save_collisions[prefs['collision']]),
                         'updatemeta': prefs['updatemeta'],
                         'bgmeta': False,
-                        'updateepubcover': prefs['updateepubcover'],
                         'smarten_punctuation':prefs['smarten_punctuation'],
                         'do_wordcount':prefs['do_wordcount'],
                         'add_tag':prefs['imaptags'],
@@ -644,6 +640,22 @@ class FanFicFarePlugin(InterfaceAction):
         if not d.status:
             return
         url = u"%s"%d.url.text()
+
+        if (anthology or d.anthology) and prefs['checkforseriesurlid']:
+            identicalbooks = self.do_id_search(url)
+            if ( len(identicalbooks) > 0 and
+                         question_dialog(self.gui, _('Skip Story?'),'''
+                                                         <h3>%s</h3>
+                                                         <p>%s</p>
+                                                         <p>%s</p>
+                                                         <p>%s</p>
+                                                         '''%(_('Skip Anthology Story?'),
+                                                              _('You already have an Anthology Ebook in your library for series "<b><a href="%s">%s</a></b>".')%(url,url),
+                                                              _("Click '<b>Yes</b>' to Skip."),
+                                                              _("Click '<b>No</b>' to download anyway.")),
+                                             show_copy_button=False)):
+                self.do_mark_series_anthologies(identicalbooks)
+                return
 
         with busy_cursor():
             self.gui.status_bar.show_message(_('Fetching Story URLs from Page...'))
@@ -1221,8 +1233,7 @@ class FanFicFarePlugin(InterfaceAction):
                            options={'fileform':'epub',
                                     'collision':ADDNEW,
                                     'updatemeta':True,
-                                    'bgmeta':False,
-                                    'updateepubcover':True},
+                                    'bgmeta':False},
                            merge=False):
         '''
         Update passed in book dict with metadata from website and
@@ -1244,7 +1255,6 @@ class FanFicFarePlugin(InterfaceAction):
         collision = book['collision'] = options['collision']
         updatemeta= options['updatemeta']
         bgmeta= options['bgmeta']
-        updateepubcover= options['updateepubcover']
 
         ## Check reject list.  Redundant with below for when story URL
         ## changes, but also kept here to avoid network hit in most
@@ -1652,8 +1662,7 @@ class FanFicFarePlugin(InterfaceAction):
                             options={'fileform':'epub',
                                      'collision':ADDNEW,
                                      'updatemeta':True,
-                                     'bgmeta':False,
-                                     'updateepubcover':True},
+                                     'bgmeta':False},
                             merge=False):
         '''
         Called by LoopProgressDialog to start story downloads BG processing.
@@ -1678,23 +1687,8 @@ class FanFicFarePlugin(InterfaceAction):
             self.download_list_completed(notjob,options=options)
             return
 
-        if prefs['mark_series_anthologies']:
-            mark_anthology_ids = options.get('mark_anthology_ids',set())
-            if mark_anthology_ids:
-                #logger.debug(mark_anthology_ids)
-                marked_ids = dict()
-                marked_text = "fff"
-                for index, book_id in enumerate(mark_anthology_ids):
-                    marked_ids[book_id] = '%s_anthology_%04d' % (marked_text, index)
-                # Mark the results in our database
-                self.gui.current_db.set_marked_ids(marked_ids)
-                # Search to display the list contents
-                self.gui.search.set_search_string('marked:' + marked_text)
-                # Sort by our marked column to display the books in order
-                self.gui.library_view.sort_by_named_field('marked', True)
-                message=_('FanFicFare is marking and showing matching Anthology Books')+"\n\n"+ \
-                    _('To disable, uncheck the "Mark Matching Anthologies?" setting in FanFicFare configuration.')
-                confirm(message,'fff_mark_series_anthologies', self.gui, show_cancel_button=False, title=_("Info"), pixmap='dialog_information.png')
+        self.do_mark_series_anthologies(options.get('mark_anthology_ids',set()))
+
         for book in book_list:
             if book['good']:
                 break
@@ -1766,6 +1760,26 @@ class FanFicFarePlugin(InterfaceAction):
         self.gui.jobs_pointer.start()
         self.gui.status_bar.show_message(_('Starting %d FanFicFare Downloads')%len(book_list),3000)
 
+    def do_mark_series_anthologies(self,mark_anthology_ids):
+        if prefs['mark_series_anthologies'] and mark_anthology_ids:
+            #logger.debug(mark_anthology_ids)
+            marked_ids = dict()
+            marked_text = "fff"
+            for index, book_id in enumerate(mark_anthology_ids):
+                marked_ids[book_id] = '%s_anthology_%04d' % (marked_text, index)
+            # Mark the results in our database
+            logger.debug("set_marked_ids:%s"%marked_ids)
+            if None in marked_ids:
+                del marked_ids[None]
+            self.gui.current_db.set_marked_ids(marked_ids)
+            # Search to display the list contents
+            self.gui.search.set_search_string('marked:' + marked_text)
+            # Sort by our marked column to display the books in order
+            self.gui.library_view.sort_by_named_field('marked', True)
+            message=_('FanFicFare is marking and showing matching Anthology Books')+"\n\n"+ \
+                _('To disable, uncheck the "Mark Matching Anthologies?" setting in FanFicFare configuration.')
+            confirm(message,'fff_mark_series_anthologies', self.gui, show_cancel_button=False, title=_("Info"), pixmap='dialog_information.png')
+
     def get_custom_col_label(self,col):
         custom_columns = self.gui.library_view.model().custom_columns
         if col and col in custom_columns:
@@ -1777,8 +1791,7 @@ class FanFicFarePlugin(InterfaceAction):
                           options={'fileform':'epub',
                                    'collision':ADDNEW,
                                    'updatemeta':True,
-                                   'bgmeta':False,
-                                   'updateepubcover':True},
+                                   'bgmeta':False},
                           errorcol_label=None,
                           lastcheckedcol_label=None):
 
@@ -1866,13 +1879,16 @@ class FanFicFarePlugin(InterfaceAction):
                     marked_ids[book_id] = '%s_chapter_error_%04d' % (marked_text, index)
 
             # Mark the results in our database, even if none.
+            if None in marked_ids:
+                del marked_ids[None]
+            logger.debug("set_marked_ids:%s"%marked_ids)
             db.set_marked_ids(marked_ids)
             # only show if there are some.
             if marked_ids and prefs['showmarked']: # show add/update
-                    # Search to display the list contents
-                    self.gui.search.set_search_string('marked:' + marked_text)
-                    # Sort by our marked column to display the books in order
-                    self.gui.library_view.sort_by_named_field('marked', True)
+                # Search to display the list contents
+                self.gui.search.set_search_string('marked:' + marked_text)
+                # Sort by our marked column to display the books in order
+                self.gui.library_view.sort_by_named_field('marked', True)
 
         logger.debug(_('Finished Adding/Updating %d books.')%(len(update_list) + len(add_list)))
         self.gui.status_bar.show_message(_('Finished Adding/Updating %d books.')%(len(update_list) + len(add_list)), 3000)
@@ -2115,7 +2131,8 @@ class FanFicFarePlugin(InterfaceAction):
                                partial(self.update_books_finish, options=options),
                                init_label=_("Updating calibre for FanFiction stories..."),
                                win_title=_("Update calibre for FanFiction stories"),
-                               status_prefix=_("Updated"))
+                               status_prefix=_("Updated"),
+                               disable_cancel=True)
 
     def update_error_column(self,payload):
         '''Update custom error column if configured.'''
@@ -2124,14 +2141,14 @@ class FanFicFarePlugin(InterfaceAction):
         lastcheckedcol_label = self.get_custom_col_label(prefs['lastcheckedcol'])
         if prefs['mark'] or errorcol_label or lastcheckedcol_label:
             self.previous = self.gui.library_view.currentIndex() # used by update_books_finish.
-            self.gui.status_bar.show_message(_('Adding/Updating %s BAD books.')%len(book_list))
             LoopProgressDialog(self.gui,
                                book_list,
                                partial(self.update_error_column_loop, db=self.gui.current_db, errorcol_label=errorcol_label, lastcheckedcol_label=lastcheckedcol_label),
                                partial(self.update_books_finish, options=options),
                                init_label=_("Updating calibre for BAD FanFiction stories..."),
                                win_title=_("Update calibre for BAD FanFiction stories"),
-                               status_prefix=_("Updated"))
+                               status_prefix=_("Updated"),
+                               disable_cancel=True)
 
     def update_error_column_loop(self,book,db=None,errorcol_label=None,lastcheckedcol_label=None):
         if book['calibre_id'] and errorcol_label:
@@ -2444,7 +2461,8 @@ class FanFicFarePlugin(InterfaceAction):
 
         logger.info("cover_image:%s"%book['all_metadata']['cover_image'])
         # updating calibre cover from book.
-        if options['fileform'] == 'epub' and (
+        if options['fileform'] == 'epub' and \
+            ( book['added'] or not prefs['covernewonly'] ) and (
             (prefs['updatecover'] and not prefs['updatecalcover']) ## backward compat
             or prefs['updatecalcover'] == SAVE_YES ## yes, always
             or (prefs['updatecalcover'] == SAVE_YES_IF_IMG ## yes, if image.
@@ -2457,7 +2475,6 @@ class FanFicFarePlugin(InterfaceAction):
                 except:
                     logger.info("Failed to set_cover, skipping")
 
-        # First, should cover generation happen at all?
         # logger.debug("book['all_metadata']['cover_image']:%s"%book['all_metadata']['cover_image'])
         if (book['added'] or not prefs['gcnewonly']) and ( # skip if not new book and gcnewonly is True
             prefs['gencalcover'] == SAVE_YES ## yes, always
@@ -2820,6 +2837,16 @@ class FanFicFarePlugin(InterfaceAction):
 
         # copy list top level
         for b in book_list:
+            if b['status'] == 'Error':
+                ## only tripped by a failure to get metadata for a
+                ## pre-existing book in anthology.
+                b['title']=_('Existing Book Update Failed')
+                b['comments']=_('''A pre-existing book in this anthology failed to find metadata.<br>
+Story URL: %s<br>
+Error: %s<br>
+The previously downloaded book is still in the anthology, but FFF doesn't have the metadata to fill this field.
+''')%(b['url'],b['comment'])
+                continue
             if b['series']:
                 bookserieslist = []
                 serieslists.append(bookserieslist)
@@ -2877,29 +2904,32 @@ class FanFicFarePlugin(InterfaceAction):
                     book['all_metadata']['dateUpdated'] = b['all_metadata']['dateUpdated']
 
             # copy list all_metadata
-            for (k,v) in six.iteritems(b['all_metadata']):
-                #print("merge_meta_books v:%s k:%s"%(v,k))
-                if k in ('numChapters','numWords'):
-                    if k in b['all_metadata'] and b['all_metadata'][k]:
-                        if k not in book['all_metadata']:
-                            book['all_metadata'][k] = b['all_metadata'][k]
+            if 'all_metadata' in b:
+                for (k,v) in six.iteritems(b['all_metadata']):
+                    #print("merge_meta_books v:%s k:%s"%(v,k))
+                    if k in ('numChapters','numWords'):
+                        if k in b['all_metadata'] and b['all_metadata'][k]:
+                            if k not in book['all_metadata']:
+                                book['all_metadata'][k] = b['all_metadata'][k]
+                            else:
+                                # lot of work for a simple add.
+                                book['all_metadata'][k] = unicode(int(book['all_metadata'][k].replace(',',''))+int(b['all_metadata'][k].replace(',','')))
+                    elif k in ('dateUpdated','datePublished','dateCreated',
+                               'series','status','title'):
+                        pass # handled above, below or skip these for now, not going to do anything with them.
+                    elif k not in book['all_metadata'] or not book['all_metadata'][k]:
+                        book['all_metadata'][k]=v
+                    elif v:
+                        if k == 'description':
+                            book['all_metadata'][k]=book['all_metadata'][k]+"\n\n"+v
                         else:
-                            # lot of work for a simple add.
-                            book['all_metadata'][k] = unicode(int(book['all_metadata'][k].replace(',',''))+int(b['all_metadata'][k].replace(',','')))
-                elif k in ('dateUpdated','datePublished','dateCreated',
-                           'series','status','title'):
-                    pass # handled above, below or skip these for now, not going to do anything with them.
-                elif k not in book['all_metadata'] or not book['all_metadata'][k]:
-                    book['all_metadata'][k]=v
-                elif v:
-                    if k == 'description':
-                        book['all_metadata'][k]=book['all_metadata'][k]+"\n\n"+v
-                    else:
-                        book['all_metadata'][k]=book['all_metadata'][k]+", "+v
-                        # flag psuedo list element.  Used so numeric
-                        # cust cols can convert back to numbers and
-                        # add.
-                        book['anthology_meta_list'][k]=True
+                            book['all_metadata'][k]=book['all_metadata'][k]+", "+v
+                            # flag psuedo list element.  Used so numeric
+                            # cust cols can convert back to numbers and
+                            # add.
+                            book['anthology_meta_list'][k]=True
+            # else:
+            #     logger.debug("'all_metadata' not in b:%s"%b)
 
         # logger.debug("book['url']:%s"%book['url'])
 
